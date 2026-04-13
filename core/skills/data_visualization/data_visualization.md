@@ -1,5 +1,5 @@
 ---
-name: data visualizaiton
+name: data_visualizaiton
 description: Use this skill whenever the task involves in generating figures or visualization. 
 ---
 
