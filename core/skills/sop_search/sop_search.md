@@ -71,14 +71,20 @@ queries = [
 Run each query and deduplicate results by SOP ID:
 
 ```python
-from sop_retriever import get_relevant_sops
+from core.tools.sop_search import sop_search
 
+score_threshold = 0.35  # tighten or relax this per task
 all_sops = {}
 for query in queries:
-    results = get_relevant_sops(query=query)
-    for sop in results:
-        all_sops[sop["id"]] = sop  # deduplicate by SOP ID
+    results = sop_search(
+        query=query,
+        score_threshold=score_threshold,
+        max_results=12,
+    )
+    # Deduplicate downstream by SOP/source identifier.
 ```
+
+Actively modify threshold and max_results depends on the situation.
 
 ---
 
