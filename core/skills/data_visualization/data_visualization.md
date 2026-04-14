@@ -365,7 +365,7 @@ def add_significance_bracket(ax, x1, x2, y, h, p_value,
 
 ```python
 # ALWAYS save SVG (vector)
-fig.savefig("/mnt/results/figure_name.svg", format="svg")
+fig.savefig("somewhere/figure_name.svg", format="svg")
 plt.close()
 ```
 
@@ -377,12 +377,12 @@ plt.close()
 ---
 ### 11. Double check — MANDATORY Protocol
 - Verify figure with figure_check tool.
-- ALWAYS run `Rigure_check("path-to-figure.png")` after saving — fix any issues before proceeding
+- ALWAYS run `figure_check("path-to-figure.png")` after saving — fix any issues before proceeding
 
 ```python
-from core.tools import figure_check
+from core.tool.figure_check import figure_check
 
-result = figure_check("path-to-figure.png")
+feedbacks = figure_check("path-to-figure.png")
 ```
 
 
