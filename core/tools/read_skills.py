@@ -1,5 +1,5 @@
 from pathlib import Path
-
+from langchain.tools import tool
 
 SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 
@@ -23,16 +23,6 @@ def _parse_frontmatter(markdown_text: str) -> dict[str, str]:
         key, value = line.split(":", 1)
         metadata[key.strip()] = value.strip()
     return metadata
-
-
-def read_skills(skill_name: str):
-    """Load and read full skill content."""
-    skill_path = _get_skill_path(skill_name)
-    try:
-        return skill_path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return f"Error: Skill {skill_name} does not exist."
-
 
 def read_skill_metadata(skill_name: str) -> dict[str, str]:
     """Extract frontmatter metadata from a skill markdown file."""
@@ -62,3 +52,13 @@ def format_skill_summaries(skill_names: list[str]) -> str:
             f'- `{metadata["skill_name"]}`: {metadata["description"]}'
         )
     return "\n".join(lines)
+
+
+@tool
+def read_skills(skill_name: str):
+    """Load and read full skill content."""
+    skill_path = _get_skill_path(skill_name)
+    try:
+        return skill_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return f"Error: Skill {skill_name} does not exist."

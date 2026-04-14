@@ -1,4 +1,4 @@
-from langchain_core.tools import tool
+from langchain.tools import tool
 from backend.utils.local_python_executor import (
     BASE_BUILTIN_MODULES,
     local_python_executor,
