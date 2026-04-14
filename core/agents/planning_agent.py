@@ -2,7 +2,7 @@ from typing import Optional
 from langchain.agents import create_agent
 from core.prompts.prompts import PLANNING_AGENT_SYSTEM_PROMPT
 from core.tools.python_executor import python_executor, reset_python_state
-from core.tools.read_skills import read_skills
+from core.tools.read_files import read_files
 
 
 
@@ -19,7 +19,7 @@ def build_planning_agent(
         Enhanced or standard planning agent
     """
 
-    tools = [python_executor, reset_python_state, read_skills]
+    tools = [python_executor, reset_python_state, read_files]
     planning_agent = create_agent(
             model=llm,
             tools=tools,
@@ -28,5 +28,4 @@ def build_planning_agent(
         )
     return planning_agent
     
-
 

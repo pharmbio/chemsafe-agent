@@ -1,11 +1,24 @@
 from pathlib import Path
+
 from langchain.tools import tool
 
-SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SKILLS_DIR = REPO_ROOT / "core" / "skills"
 
 
 def _get_skill_path(skill_name: str) -> Path:
-    return SKILLS_DIR / skill_name / f"{skill_name}.md"
+    skill_dir = SKILLS_DIR / skill_name
+    candidates = (
+        skill_dir / "SKILL.md",
+        skill_dir / f"{skill_name}.md",
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[0]
 
 
 def _parse_frontmatter(markdown_text: str) -> dict[str, str]:
@@ -23,6 +36,14 @@ def _parse_frontmatter(markdown_text: str) -> dict[str, str]:
         key, value = line.split(":", 1)
         metadata[key.strip()] = value.strip()
     return metadata
+
+
+def _resolve_file_path(file_path: str) -> Path:
+    candidate = Path(file_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    return candidate.resolve(strict=True)
+
 
 def read_skill_metadata(skill_name: str) -> dict[str, str]:
     """Extract frontmatter metadata from a skill markdown file."""
@@ -48,17 +69,21 @@ def format_skill_summaries(skill_names: list[str]) -> str:
     lines = []
     for skill_name in skill_names:
         metadata = read_skill_metadata(skill_name)
-        lines.append(
-            f'- `{metadata["skill_name"]}`: {metadata["description"]}'
-        )
+        lines.append(f'- `{metadata["skill_name"]}`: {metadata["description"]}')
     return "\n".join(lines)
 
 
 @tool
-def read_skills(skill_name: str):
-    """Load and read full skill content."""
-    skill_path = _get_skill_path(skill_name)
+def read_files(file_path: str):
+    """Read a UTF-8 text file by absolute path or repository-relative path."""
     try:
-        return skill_path.read_text(encoding="utf-8").strip()
+        resolved_path = _resolve_file_path(file_path)
+        if not resolved_path.is_file():
+            return f"Error: {file_path} is not a file."
+        return resolved_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return f"Error: Skill {skill_name} does not exist."
+        return f"Error: File {file_path} does not exist."
+    except UnicodeDecodeError:
+        return f"Error: File {file_path} is not a UTF-8 text file."
+    except OSError as exc:
+        return f"Error reading {file_path}: {exc}"
