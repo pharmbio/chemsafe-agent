@@ -1,0 +1,31 @@
+"""Partner metadata shared across the UI."""
+
+from __future__ import annotations
+
+from typing import Dict, List
+
+PARTNER_ORGANIZATIONS: List[Dict[str, str]] = [
+    {
+        "name": "Uppsala University",
+        "logo": "images/uu_logo.png",
+        "url": "https://www.uu.se/en/",
+        "size": "xl",
+    },
+    {
+        "name": "SciLifeLab Serve",
+        "logo": "images/serve_logo.png",
+        "url": "https://serve.scilifelab.se/",
+        "size": "xl",
+    },
+    {
+        "name": "European Union",
+        "logo": "images/EU_logo.png",
+        "url": "https://research-and-innovation.ec.europa.eu/funding/funding-opportunities/funding-programmes-and-open-calls/horizon-europe_en",
+        "size": "xl",
+    },
+]
+
+
+def get_partner_organizations() -> List[Dict[str, str]]:
+    """Return a shallow copy of partner metadata."""
+    return [dict(partner) for partner in PARTNER_ORGANIZATIONS]
