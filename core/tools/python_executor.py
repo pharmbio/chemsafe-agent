@@ -49,6 +49,9 @@ DEFAULT_AUTHORIZED_IMPORTS = [
     'requests',
     'openpyxl',
     'httpx',
+    'pubchempy',
+    'chembl_webresource_client'
+    
 ]
 authorized_imports = sorted(set(BASE_BUILTIN_MODULES) | set(DEFAULT_AUTHORIZED_IMPORTS))
 
