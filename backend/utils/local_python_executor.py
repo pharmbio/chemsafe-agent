@@ -1541,7 +1541,11 @@ def reset_executor_state():
     _global_executor = None
 
 
-def local_python_executor(code: str, authorized_imports: List[str]):
+def local_python_executor(
+    code: str,
+    authorized_imports: List[str],
+    variables: Optional[Dict[str, Any]] = None,
+):
     """
     Executes Python code in a sandboxed environment with restricted imports for security.
     Uses a global persistent executor to maintain variable state across executions.
@@ -1562,6 +1566,9 @@ def local_python_executor(code: str, authorized_imports: List[str]):
             A list of module names that are allowed to be imported by the code.
             These are in addition to the base built-in modules defined in BASE_BUILTIN_MODULES.
             For unrestricted imports (use with caution), include "*" in the list.
+        variables (Optional[Dict[str, Any]]):
+            Optional variables to inject into the persistent execution state before
+            the code runs. Existing names will be updated for the current execution.
     
     Returns:
         Any: The result of the last statement in the executed code. If the code raises
@@ -1616,6 +1623,9 @@ def local_python_executor(code: str, authorized_imports: List[str]):
         if set(_global_executor.authorized_imports) != set(new_authorized_imports):
             _global_executor.authorized_imports = new_authorized_imports
     
+    if variables:
+        _global_executor.send_variables(variables)
+
     # Execute using the persistent global executor
     output, logs, is_final_answer = _global_executor(code_action=code)
     
