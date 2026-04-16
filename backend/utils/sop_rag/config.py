@@ -1,11 +1,10 @@
-import os
 from pathlib import Path
 
+from app.config import DATA_ROOT, MEMORY_ROOT, REPO_ROOT
+
 # Base paths
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DATA_DIR = REPO_ROOT / "persistence" / "uploaded_data"
-_memory_root = os.environ.get("MEMORY_ROOT")
-MEMORY_DIR = Path(_memory_root) if _memory_root else REPO_ROOT / "persistence" / "memory"
+DATA_DIR = DATA_ROOT
+MEMORY_DIR = MEMORY_ROOT
 MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
 # SOP specific paths

@@ -38,15 +38,12 @@ from backend.utils.sop_rag.config import (
     ID_KEY,
     DOCSTORE_PATH,
 )
-from dotenv import load_dotenv
-
-load_dotenv(REPO_ROOT / ".env")
-load_dotenv()
+from app.config import OPENAI_API_KEY
 
 
 def _require_openai_api_key() -> str:
     """Return the configured OpenAI API key or raise if missing."""
-    openai_api_key = os.getenv("OPENAI_API_KEY")
+    openai_api_key = OPENAI_API_KEY
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured; cannot run SOP retrieval.")
     return openai_api_key
