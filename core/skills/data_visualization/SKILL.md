@@ -1,5 +1,5 @@
 ---
-name: data_visualizaiton
+name: data_visualization
 description: Use this skill whenever the task involves in generating figures or visualization. 
 ---
 
@@ -380,7 +380,7 @@ plt.close()
 - ALWAYS run `figure_check("path-to-figure.png")` after saving — fix any issues before proceeding
 
 ```python
-from core.tool.figure_check import figure_check
+from core.skills.data_visualization.scripts.figure_check import figure_check
 
 feedbacks = figure_check("path-to-figure.png")
 ```

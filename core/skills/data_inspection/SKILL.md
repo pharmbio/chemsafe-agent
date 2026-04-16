@@ -1,5 +1,5 @@
 ---
-name: data-inspection-skill
+name: data_inspection
 description: Use this skill whenever data files need to be inspected or understood before any downstream task — planning, analysis, transformation, or reporting. Triggers when the user uploads a file (CSV, Excel, JSON, database dump, or log/text file) and any subsequent task depends on understanding that data. Always run this skill before generating a plan, writing transformation logic, or making data-driven decisions, even if the user does not explicitly ask for data inspection.
 ---
 

@@ -71,7 +71,7 @@ queries = [
 Run each query and deduplicate results by SOP ID:
 
 ```python
-from core.skills.sop_search.sop_search import sop_search
+from core.skills.sop_search.scripts.sop_search import sop_search
 
 score_threshold = 0.35  # tighten or relax this per task
 all_sops = {}
