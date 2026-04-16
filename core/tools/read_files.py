@@ -2,6 +2,9 @@ from pathlib import Path
 
 from langchain.tools import tool
 
+from app.config import DATA_ROOT, MEMORY_ROOT, RESULTS_ROOT
+from backend.utils.output_paths import conversation_output_root, get_current_conversation_id, get_current_user_id
+from backend.utils.storage_paths import thread_data_root
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / "core" / "skills"
@@ -42,7 +45,37 @@ def _resolve_file_path(file_path: str) -> Path:
     candidate = Path(file_path).expanduser()
     if not candidate.is_absolute():
         candidate = REPO_ROOT / candidate
-    return candidate.resolve(strict=True)
+    resolved = candidate.resolve(strict=True)
+    _assert_allowed_read_path(resolved)
+    return resolved
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _assert_allowed_read_path(path: Path) -> None:
+    resolved_path = path.resolve()
+    user_id = get_current_user_id() or "anonymous-user"
+    conversation_id = get_current_conversation_id() or "default-thread"
+    allowed_data_root = thread_data_root(conversation_id, user_id=user_id, create=False).resolve()
+    allowed_output_root = conversation_output_root(conversation_id, user_id=user_id).resolve()
+    managed_roots = (DATA_ROOT.resolve(), RESULTS_ROOT.resolve(), MEMORY_ROOT.resolve())
+
+    if _is_relative_to(resolved_path, allowed_data_root) or _is_relative_to(resolved_path, allowed_output_root):
+        return
+
+    if any(_is_relative_to(resolved_path, managed_root) for managed_root in managed_roots):
+        raise PermissionError(
+            "Read access to persisted data is limited to the active thread's data and output scope."
+        )
+
+    if not _is_relative_to(resolved_path, REPO_ROOT.resolve()):
+        raise PermissionError("Read access is limited to repository files and the active thread scope.")
 
 
 def read_skill_metadata(skill_name: str) -> dict[str, str]:
@@ -83,6 +116,8 @@ def read_files(file_path: str):
         return resolved_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return f"Error: File {file_path} does not exist."
+    except PermissionError as exc:
+        return f"Error: {exc}"
     except UnicodeDecodeError:
         return f"Error: File {file_path} is not a UTF-8 text file."
     except OSError as exc:
