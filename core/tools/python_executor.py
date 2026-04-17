@@ -9,6 +9,7 @@ from langchain.tools import tool
 from app.config import DATA_ROOT, MEMORY_ROOT, REPO_ROOT, RESULTS_ROOT
 from backend.utils.local_python_executor import (
     BASE_BUILTIN_MODULES,
+    InterpreterError,
     local_python_executor,
     reset_executor_state,
 )
@@ -205,11 +206,20 @@ def python_executor(code: str):
     Returns:
         The result of the execution.
     """
-    return local_python_executor(
-        code,
-        authorized_imports,
-        variables=_build_python_execution_context(),
-    )
+    try:
+        return local_python_executor(
+            code,
+            authorized_imports,
+            variables=_build_python_execution_context(),
+        )
+    except InterpreterError as exc:
+        return {
+            "ok": False,
+            "error_type": "InterpreterError",
+            "error": str(exc),
+            "input_code": code,
+            "authorized_imports": authorized_imports,
+        }
 
 
 @tool
