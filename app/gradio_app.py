@@ -207,15 +207,15 @@ def _thread_to_dict(meta) -> Dict[str, Any]:
 
 
 def _auth_message(text: str, success: bool = True) -> str:
-    prefix = "Success:" if success else "Error:"
+    prefix = "**Success:**" if success else "**Error:**"
     return f"{prefix} {text}"
 
 
 def _auth_status_text(state: UIState) -> str:
     if not state.is_authenticated:
-        base = "**Authentication**: not signed in."
+        base = " "
     else:
-        base = f"**Authentication**: signed in as `{state.user_email}`."
+        base = f"**Signed in as **: signed in as `{state.user_email}`."
     if state.auth_error:
         return f"{base}\n\n{state.auth_error}"
     return base
