@@ -18,9 +18,15 @@ PARTNER_ORGANIZATIONS: List[Dict[str, str]] = [
         "size": "xl",
     },
     {
-        "name": "European Union",
-        "logo": "images/EU_logo.png",
-        "url": "https://research-and-innovation.ec.europa.eu/funding/funding-opportunities/funding-programmes-and-open-calls/horizon-europe_en",
+        "name": "PARC",
+        "logo": "images/parc_logo.png",
+        "url": "https://www.eu-parc.eu",
+        "size": "xl",
+    },
+        {
+        "name": "Merck Life Science",
+        "logo": "images/merck_logo.png",
+        "url": "https://www.merck.com",
         "size": "xl",
     },
 ]
