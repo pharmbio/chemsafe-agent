@@ -4,7 +4,7 @@ import json
 from typing import Any, Literal, Optional
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph, add_messages
 from langgraph.types import interrupt
 from typing_extensions import Annotated, TypedDict
@@ -148,8 +148,8 @@ async def _compress_context(state: AgentGraphState) -> dict[str, Any]:
     return {"messages": [make_summary_message(summary_text, memory)]}
 
 
-def _route_after_human(state: AgentGraphState) -> Literal["planning_agent", "execute_agent"]:
-    return "execute_agent" if state.get("plan_status") == "approved" else "planning_agent"
+def _route_after_human(state: AgentGraphState) -> Literal["planning_agent", "approval_ack"]:
+    return "approval_ack" if state.get("plan_status") == "approved" else "planning_agent"
 
 
 def _latest_plan(messages: list[BaseMessage]) -> str:
@@ -180,6 +180,17 @@ def human_chat_node(state: AgentGraphState) -> dict[str, Any]:
     }
 
 
+def approval_ack_node(_: AgentGraphState) -> dict[str, Any]:
+    return {
+        "messages": [
+            AIMessage(
+                content="Thanks for approval. I'll start executing the approved plan now.",
+                name="approval_ack",
+            )
+        ]
+    }
+
+
 async def create_app(
     checkpointer,
     *,
@@ -199,6 +210,7 @@ async def create_app(
     graph = StateGraph(AgentGraphState)
     graph.add_node("planning_agent", planning_agent)
     graph.add_node("human_chat", human_chat_node)
+    graph.add_node("approval_ack", approval_ack_node)
     graph.add_node("execute_agent", execute_agent)
     graph.add_node("summary_agent", summary_agent)
     if use_context_compression:
@@ -211,9 +223,10 @@ async def create_app(
         _route_after_human,
         {
             "planning_agent": "planning_agent",
-            "execute_agent": "execute_agent",
+            "approval_ack": "approval_ack",
         },
     )
+    graph.add_edge("approval_ack", "execute_agent")
     graph.add_edge("execute_agent", "summary_agent")
     if use_context_compression:
         graph.add_edge("summary_agent", "context_summary")

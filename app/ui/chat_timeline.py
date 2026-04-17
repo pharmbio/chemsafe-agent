@@ -12,12 +12,8 @@ from app.ui.formatters import _derive_message_id
 
 
 AGENT_TITLES = {
-    "supervisor": "Supervisor",
-    "research_agent": "Research Agent",
-    "data_agent": "Data Agent",
-    "prediction_agent": "Prediction Agent",
-    "report_agent": "Report Agent",
     "planning_agent": "Planning Agent",
+    "approval_ack": "Planning Agent",
     "execute_agent": "Execute Agent",
     "summary_agent": "Summary Agent",
     "summary": "Summary",
