@@ -77,39 +77,39 @@ INTRO_IMAGE_PATH = "images/agent_illustration.png"
 INTRO_IMAGE_ALT = f"{APP_TITLE} illustration"
 HEADER_LINKS_HTML = (
     "<div class='header-links-content'>"
-    "<a class='header-link' href='https://github.com/' target='_blank' rel='noopener noreferrer'>GitHub</a>"
+    "<a class='header-link' href='https://github.com/pharmbio/chemsafe-agent' target='_blank' rel='noopener noreferrer'>GitHub</a>"
     "<span class='header-link-divider' aria-hidden='true'>|</span>"
     "<a class='header-link' href='/' target='_self' rel='noopener noreferrer'>Workspace</a>"
     "</div>"
 )
 
 PRIMARY_FERN = colors.Color(
-    c50="#dbeee5",
-    c100="#cfe3d9",
-    c200="#bad4c7",
-    c300="#9fc3b2",
-    c400="#78a78f",
-    c500="#3f7f6e",
-    c600="#1f5c55",
-    c700="#184842",
-    c800="#10322d",
-    c900="#0a211f",
-    c950="#05110f",
+    c50="#f8dddd",
+    c100="#f2c8c8",
+    c200="#e6a7a7",
+    c300="#d87d7d",
+    c400="#c65555",
+    c500="#ad3434",
+    c600="#8f1f1f",
+    c700="#711818",
+    c800="#511010",
+    c900="#360a0a",
+    c950="#1c0404",
     name="chemsafe_primary_green",
 )
 
 SECONDARY_SAGE = colors.Color(
-    c50="#edf6f2",
-    c100="#dfeee6",
-    c200="#c8dfd3",
-    c300="#b2d1c0",
-    c400="#95bfa9",
-    c500="#79ad92",
-    c600="#5e967c",
-    c700="#4b7761",
-    c800="#365646",
-    c900="#233a2f",
-    c950="#142019",
+    c50="#fcf0f0",
+    c100="#f9e2e2",
+    c200="#f1c9c9",
+    c300="#e7adad",
+    c400="#d98a8a",
+    c500="#c66969",
+    c600="#ab4f4f",
+    c700="#8b3d3d",
+    c800="#652b2b",
+    c900="#451c1c",
+    c950="#250d0d",
     name="chemsafe_secondary_green",
 )
 
@@ -120,7 +120,7 @@ CHEMSAFE_THEME = (
         neutral_hue=colors.gray,
     ).set(
         color_accent="*primary_600",
-        color_accent_soft="#dbeee5",
+        color_accent_soft="#f8dddd",
         color_accent_soft_dark="*primary_700",
         button_primary_background_fill="*primary_600",
         button_primary_background_fill_hover="*primary_500",
@@ -667,7 +667,7 @@ async def on_register(email: str, password: str, confirm: str, state: UIState):
     try:
         _validate_password_strength(password)
         await AUTH_SERVICE.register_user(email, password)
-        state.auth_error = _auth_message("Registration submitted. Await maintainer approval before signing in.", success=True)
+        state.auth_error = _auth_message("Registration submitted. Approval pending. You will be notified by email once your account is ready.", success=True)
     except Exception as exc:
         state.auth_error = _auth_message(str(exc), success=False)
     return state, _auth_status_text(state), _logout_visibility(state), _login_visibility(state)
@@ -1171,14 +1171,14 @@ def build_demo() -> gr.Blocks:
         --app-font: "Inter", "Helvetica Neue", Arial, sans-serif;
         --header-link-color: #1f2937;
         --header-link-divider-color: #9ca3af;
-        --header-link-hover-color: #1f5c55;
+        --header-link-hover-color: #8f1f1f;
         --partner-card-width: 220px;
         --partner-card-gap: 1.15rem;
     }
     body.dark {
         --header-link-color: #f8fafc;
         --header-link-divider-color: rgba(248, 250, 252, 0.65);
-        --header-link-hover-color: #9fc3b2;
+        --header-link-hover-color: #d87d7d;
     }
     body,
     .gradio-container,
@@ -1411,7 +1411,7 @@ def build_demo() -> gr.Blocks:
 
         with gr.Row(elem_id="layout-row"):
             with gr.Column(scale=1, min_width=280, elem_id="sidebar-column"):
-                auth_status_md = gr.Markdown(value="**Authentication**: not signed in.")
+                auth_status_md = gr.Markdown(value="**Login to use the ChemSafeAgent**")
                 with gr.Tabs():
                     with gr.Tab("Login"):
                         login_email = gr.Textbox(label="Email", placeholder="you@example.com")
