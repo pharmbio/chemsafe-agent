@@ -1245,7 +1245,7 @@ def build_demo() -> gr.Blocks:
         max-width: none;
         width: 100vw;
         margin: 0 auto !important;
-        padding: 1.5rem 2.25rem 2rem;
+        padding: 1.5rem 1.25rem 2rem;
     }
     .gradio-container a {
         color: var(--link-color);
@@ -1353,8 +1353,8 @@ def build_demo() -> gr.Blocks:
         background: linear-gradient(180deg, #fafaf9 0%, #f8f8f8 100%);
     }
     #partner-logos-panel .partner-slider {
-        width: min(100%, 1080px);
-        margin: 0 auto;
+        width: 100%;
+        margin: 0;
     }
     .partner-slider__viewport {
         overflow: hidden;
@@ -1438,8 +1438,12 @@ def build_demo() -> gr.Blocks:
         background: #fff;
     }
     #layout-row {
+        width: 100%;
         gap: 1.5rem;
         align-items: flex-start;
+    }
+    #layout-row > div {
+        min-width: 0;
     }
     #conversation-column {
         display: flex;
@@ -1448,6 +1452,9 @@ def build_demo() -> gr.Blocks:
         padding: 1rem 1rem 1.1rem;
         background: var(--page-bg);
         border: 1px solid transparent;
+        flex: 1 1 0 !important;
+        width: auto !important;
+        min-width: 0 !important;
     }
     #sidebar-column {
         display: flex;
@@ -1457,6 +1464,9 @@ def build_demo() -> gr.Blocks:
         top: 1rem;
         align-self: flex-start;
         min-width: 312px;
+        width: 312px !important;
+        flex: 0 0 312px !important;
+        max-width: 312px;
     }
     #sidebar-column > div {
         background: var(--page-bg);
