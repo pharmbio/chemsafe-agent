@@ -578,20 +578,14 @@ def _render_tool_section(title: str, body: str, tool_name: Optional[str], *, bod
 def _format_tool_call_body(tool_name: Optional[str], args: Any) -> Tuple[str, bool]:
     if args is None:
         return "", False
-    if isinstance(args, (dict, list)):
-        return _render_code_block(json.dumps(args, indent=2), language="json"), True
-    if isinstance(args, str):
-        stripped = args.strip()
-        if stripped.startswith("{") or stripped.startswith("["):
-            try:
-                parsed = json.loads(stripped)
-                return _render_code_block(json.dumps(parsed, indent=2), language="json"), True
-            except json.JSONDecodeError:
-                pass
-        if tool_name == "python_executor":
-            return _render_code_block(args, language="python"), True
-        return args, False
-    return str(args), False
+    parsed_args = _parse_tool_args(args)
+    if tool_name == "python_executor":
+        code = _maybe_extract_python_code(parsed_args)
+        if code:
+            return _render_code_block(code, language="python"), True
+    if isinstance(parsed_args, (dict, list)):
+        return _render_code_block(json.dumps(parsed_args, indent=2), language="json"), True
+    return str(parsed_args), False
 
 
 def _format_tool_result_content(raw_content: Any, tool_name: Optional[str]) -> Tuple[str, bool]:
@@ -604,6 +598,26 @@ def _format_tool_result_content(raw_content: Any, tool_name: Optional[str]) -> T
     if isinstance(raw_content, (dict, list)):
         return _render_code_block(json.dumps(raw_content, indent=2), language="json"), True
     return str(raw_content), False
+
+
+def _parse_tool_args(call_args: Any) -> Any:
+    if isinstance(call_args, str):
+        try:
+            return json.loads(call_args)
+        except json.JSONDecodeError:
+            return call_args
+    return call_args
+
+
+def _maybe_extract_python_code(call_args: Any) -> str:
+    if isinstance(call_args, dict):
+        for key in ("code", "python_code", "script", "snippet"):
+            code = call_args.get(key)
+            if isinstance(code, str) and code.strip():
+                return code.rstrip("\n")
+    if isinstance(call_args, str) and call_args.strip():
+        return call_args.rstrip("\n")
+    return ""
 
 
 def _maybe_extract_code_from_result(raw_content: Any) -> str:
