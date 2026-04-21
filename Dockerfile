@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GRADIO_SERVER_NAME="0.0.0.0" \
     GRADIO_SERVER_PORT=7860
 
-ENV USER=repuragent
+ENV USER=chemsafeagent
 ENV HOME=/home/$USER
 
 ENV PERSIST_ROOT=/home/$USER/app/persistence
@@ -69,7 +69,7 @@ RUN chmod -R 755 $HOME/app
 RUN chown -R $USER:$USER $HOME
 
 # Create a single volume mount for all persistent artifacts
-VOLUME ["/home/repuragent/app/persistence"]
+VOLUME ["/home/chemsafeagent/app/persistence"]
 
 # Expose Gradio port
 EXPOSE 7860
