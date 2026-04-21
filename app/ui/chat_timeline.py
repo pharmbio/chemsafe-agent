@@ -5,7 +5,16 @@ from copy import deepcopy
 from html import escape
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+import gradio as gr
 from gradio.components.chatbot import ChatMessage
+try:
+    from markdown_it import MarkdownIt
+except ImportError:  # pragma: no cover - optional dependency
+    MarkdownIt = None
+try:
+    from markdown import markdown as _markdown_to_html
+except ImportError:  # pragma: no cover - fallback for lean runtimes
+    _markdown_to_html = None
 
 from app.state import UIState
 from app.ui.formatters import _derive_message_id
@@ -22,6 +31,15 @@ AGENT_TITLES = {
 
 IGNORED_NODES = {"human_chat", "__start__", "__end__", "summary", "context_summary"}
 TIMELINE_SNAPSHOT_VERSION = 1
+
+_MARKDOWN_IT_RENDERER = (
+    MarkdownIt(
+        "commonmark",
+        {"breaks": True, "html": False},
+    )
+    if MarkdownIt is not None
+    else None
+)
 
 
 def reset_chat_messages(state: UIState) -> None:
@@ -562,7 +580,17 @@ def _refresh_block_message(state: UIState, block_id: str) -> None:
     idx = state.message_lookup.get(block_id)
     if idx is None or idx >= len(state.messages):
         return
-    state.messages[idx].content = _render_block_content(block["items"])
+    if _block_uses_embedded_html(block["items"]):
+        state.messages[idx].content = gr.HTML(
+            value=_render_block_html(block["items"]),
+            container=False,
+        )
+    else:
+        state.messages[idx].content = _render_block_content(block["items"])
+
+
+def _block_uses_embedded_html(items: List[Dict[str, Any]]) -> bool:
+    return any(item.get("type") in {"tool_call", "tool_result"} for item in items)
 
 
 def _restore_tool_lookup_for_block(state: UIState, block: Dict[str, Any]) -> None:
@@ -606,6 +634,51 @@ def _render_block_content(items: List[Dict[str, str]]) -> str:
                 )
             )
     return "\n\n".join(sections).strip()
+
+
+def _render_block_html(items: List[Dict[str, Any]]) -> str:
+    sections: List[str] = []
+    for item in items:
+        item_type = item.get("type")
+        if item_type == "message":
+            content = item.get("content", "")
+            if content:
+                sections.append(_render_message_section_html(content))
+        elif item_type == "tool_call":
+            sections.append(
+                _render_tool_section(
+                    "Tools Calling",
+                    item.get("content", ""),
+                    item.get("tool_name"),
+                    body_is_html=item.get("content_is_html", False),
+                )
+            )
+        elif item_type == "tool_result":
+            sections.append(
+                _render_tool_section(
+                    "Tools Result",
+                    item.get("content", ""),
+                    item.get("tool_name"),
+                    body_is_html=item.get("content_is_html", False),
+                )
+            )
+    return f"<div class='agent-block-content'>{''.join(sections)}</div>"
+
+
+def _render_message_section_html(content: str) -> str:
+    stripped = content.strip()
+    if not stripped:
+        return ""
+    if _MARKDOWN_IT_RENDERER is not None:
+        body = _MARKDOWN_IT_RENDERER.render(stripped)
+    elif _markdown_to_html is not None:
+        body = _markdown_to_html(
+            escape(stripped),
+            extensions=["extra", "nl2br", "sane_lists"],
+        )
+    else:
+        body = f"<div class='agent-message-inline'>{escape(stripped)}</div>"
+    return f"<section class='agent-message-section'>{body}</section>"
 
 
 def _render_tool_section(title: str, body: str, tool_name: Optional[str], *, body_is_html: bool = False) -> str:
