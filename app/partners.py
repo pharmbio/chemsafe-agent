@@ -12,12 +12,6 @@ PARTNER_ORGANIZATIONS: List[Dict[str, str]] = [
         "size": "xl",
     },
     {
-        "name": "SciLifeLab Serve",
-        "logo": "images/serve_logo.png",
-        "url": "https://serve.scilifelab.se/",
-        "size": "xl",
-    },
-    {
         "name": "PARC",
         "logo": "images/parc_logo.png",
         "url": "https://www.eu-parc.eu",
@@ -27,6 +21,12 @@ PARTNER_ORGANIZATIONS: List[Dict[str, str]] = [
         "name": "Merck Life Science",
         "logo": "images/merck_logo.png",
         "url": "https://www.merck.com",
+        "size": "xl",
+    },
+        {
+        "name": "SciLifeLab Serve",
+        "logo": "images/serve_logo.png",
+        "url": "https://serve.scilifelab.se/",
         "size": "xl",
     },
 ]
