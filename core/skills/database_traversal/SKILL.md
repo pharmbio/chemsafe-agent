@@ -17,7 +17,7 @@ PubChem is the broadest source: GHS classification, physical properties, toxicit
 
 The correct traversal pattern is recursive search through `record["Record"]["Section"]`, descending into `section["Section"]` children, collecting any section whose `TOCHeading` matches the target content. Text lives at leaf nodes inside `section["Information"][*]["Value"]["StringWithMarkup"][*]["String"]`.
 
-Read `core/skills/database_trversal/references/pubchem.md` for the full access pattern and extraction code.
+Read `core/skills/database_traversal/references/pubchem.md` for the full access pattern and extraction code.
 
 ### NIOSH NPG — HTML Index + Detail Page Scraping
 
@@ -25,7 +25,7 @@ NIOSH is the authoritative source for occupational safety: REL/IDLH exposure lim
 
 The correct approach is to load the index table once into a DataFrame and reuse it across queries — not to re-fetch per compound. Detail pages are unstructured HTML; the extraction strategy is text-block slicing between known section title strings, not CSS/XPath selectors.
 
-Read `core/skills/database_trversal/references/niosh.md` for scraping patterns and section extraction.
+Read `core/skills/database_traversal/references/niosh.md` for scraping patterns and section extraction.
 
 ### OPCW — Embedded Power BI API
 
@@ -33,7 +33,7 @@ OPCW covers chemical weapons convention scheduled compounds. The data is served 
 
 OPCW does not support per-compound queries — the entire compound list must be fetched and filtered locally. Treat the fetched DataFrame as an in-memory lookup table.
 
-Read `core/skills/database_trversal/references/opcw.md` for the full payload, headers, and DSR parser.
+Read `core/skills/database_traversal/references/opcw.md` for the full payload, headers, and DSR parser.
 
 ---
 
@@ -41,7 +41,7 @@ Read `core/skills/database_trversal/references/opcw.md` for the full payload, he
 
 **Choose the source based on what the user actually needs, not just what's easiest to query.** Occupational exposure limits → NIOSH. CWC schedule status → OPCW. Broad safety summary, GHS, physical properties → PubChem. When multiple concerns overlap, PubChem first, NIOSH to supplement.
 
-**Resolve identifiers before fetching data.** All three sources require mapping a human query — a name, synonym, CAS number — to a source-specific identifier or match. The resolution approach differs per source. Read `references/id_resolution.md` for normalization, CAS detection, cross-source resolution, and handling ambiguous multi-match results.
+**Resolve identifiers before fetching data.** All three sources require mapping a human query — a name, synonym, CAS number — to a source-specific identifier or match. The resolution approach differs per source. Read `core/skills/database_traversal/references/id_resolution.md` for normalization, CAS detection, cross-source resolution, and handling ambiguous multi-match results.
 
 **Return structured dicts, never raw responses.** Every retrieval function should return a typed dict with at minimum `found` (bool), `query` (original input), and either data fields or a `reason` string on failure. Never surface raw HTML, unparsed JSON, or exceptions to the caller.
 
