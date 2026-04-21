@@ -216,7 +216,7 @@ def _auth_status_text(state: UIState) -> str:
     if not state.is_authenticated:
         base = " "
     else:
-        base = f"**Signed in as **: signed in as `{state.user_email}`."
+        base = f"**Signed in as:** `{state.user_email}`."
     if state.auth_error:
         return f"{base}\n\n{state.auth_error}"
     return base
