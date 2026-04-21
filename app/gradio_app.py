@@ -284,6 +284,39 @@ def _parse_complete_payload(payload: Any) -> Tuple[bool, Optional[datetime]]:
     return interrupted, completed_dt
 
 
+TIMELINE_STATE_VERSION = 1
+
+
+def _serialize_timeline_state(state: UIState) -> Dict[str, Any]:
+    return {
+        "timeline_state_version": TIMELINE_STATE_VERSION,
+        "timeline_snapshot": export_timeline_snapshot(state),
+        "processed_message_ids": sorted(str(msg_id) for msg_id in state.processed_message_ids if msg_id),
+        "processed_tools_ids": sorted(str(tool_id) for tool_id in state.processed_tools_ids if tool_id),
+    }
+
+
+def _extract_timeline_snapshot(payload: Any) -> Any:
+    if isinstance(payload, dict) and "timeline_snapshot" in payload:
+        return payload["timeline_snapshot"]
+    return payload
+
+
+def _restore_timeline_processing_state(state: UIState, payload: Any) -> None:
+    if not isinstance(payload, dict) or "timeline_snapshot" not in payload:
+        return
+    state.processed_message_ids = {
+        str(msg_id)
+        for msg_id in (payload.get("processed_message_ids") or [])
+        if msg_id
+    }
+    state.processed_tools_ids = {
+        str(tool_id)
+        for tool_id in (payload.get("processed_tools_ids") or [])
+        if tool_id
+    }
+
+
 def _apply_stream_event(event_type: str, payload: Any, state: UIState) -> bool:
     if event_type == "ai_message" and isinstance(payload, dict):
         return process_ai_message(state, payload.get("agent"), payload.get("message"), payload.get("tool_calls"))
@@ -518,19 +551,21 @@ async def _refresh_thread_files_for(state: UIState, thread_id: Optional[str]) ->
 async def _persist_timeline_snapshot(thread_id: Optional[str], state: UIState) -> None:
     if not thread_id or not state.user_id:
         return
-    await save_timeline(state.user_id, thread_id, export_timeline_snapshot(state))
+    await save_timeline(state.user_id, thread_id, _serialize_timeline_state(state))
 
 
 async def _apply_event_to_persisted_timeline(state: UIState, thread_id: Optional[str], event_type: str, payload: Any) -> None:
-    if not thread_id or not state.user_id or event_type in {"chunk", "complete"}:
+    if not thread_id or not state.user_id or event_type == "complete":
         return
-    snapshot = await load_timeline(state.user_id, thread_id)
+    timeline_payload = await load_timeline(state.user_id, thread_id)
     timeline_state = UIState()
+    snapshot = _extract_timeline_snapshot(timeline_payload)
     if isinstance(snapshot, dict):
         rebuild_from_timeline_snapshot(timeline_state, snapshot)
+    _restore_timeline_processing_state(timeline_state, timeline_payload)
     updated = _apply_stream_event(event_type, payload, timeline_state)
     if updated:
-        await save_timeline(state.user_id, thread_id, export_timeline_snapshot(timeline_state))
+        await save_timeline(state.user_id, thread_id, _serialize_timeline_state(timeline_state))
 
 
 async def _refresh_conversation(state: UIState, thread_id: str) -> None:
@@ -539,7 +574,8 @@ async def _refresh_conversation(state: UIState, thread_id: str) -> None:
     state.processed_message_ids = set()
     state.processed_tools_ids = set()
     state.processed_content_hashes = set()
-    snapshot = await load_timeline(state.user_id, thread_id) if state.user_id else None
+    timeline_payload = await load_timeline(state.user_id, thread_id) if state.user_id else None
+    snapshot = _extract_timeline_snapshot(timeline_payload)
     rebuilt = False
     if isinstance(snapshot, dict):
         rebuilt = rebuild_from_timeline_snapshot(state, snapshot)
@@ -548,6 +584,7 @@ async def _refresh_conversation(state: UIState, thread_id: str) -> None:
         rebuilt = True
     if not rebuilt:
         reset_chat_messages(state)
+    _restore_timeline_processing_state(state, timeline_payload)
     state.ensure_thread_storage(thread_id)
     await _refresh_thread_files_for(state, thread_id)
     state.uploaded_files = [record for record in state.thread_files.get(thread_id, []) if _is_data_path(record.path)]
@@ -947,12 +984,18 @@ async def _run_user_message_internal(prompt: str, state: UIState):
                             await _persist_timeline_snapshot(thread_id, state)
                         else:
                             timeline_state = UIState()
-                            snapshot = await load_timeline(state.user_id, thread_id) if state.user_id else None
+                            timeline_payload = await load_timeline(state.user_id, thread_id) if state.user_id else None
+                            snapshot = _extract_timeline_snapshot(timeline_payload)
                             if isinstance(snapshot, dict):
                                 rebuild_from_timeline_snapshot(timeline_state, snapshot)
+                            _restore_timeline_processing_state(timeline_state, timeline_payload)
                             updated = _record_stream_error(timeline_state, exc)
                             if updated and state.user_id:
-                                await save_timeline(state.user_id, thread_id, export_timeline_snapshot(timeline_state))
+                                await save_timeline(
+                                    state.user_id,
+                                    thread_id,
+                                    _serialize_timeline_state(timeline_state),
+                                )
                             _clear_pending_chunk_events(state, thread_id)
                         if ui_attached and updated:
                             yield (
@@ -979,11 +1022,7 @@ async def _run_user_message_internal(prompt: str, state: UIState):
                             state.last_run_at[thread_id] = completed_at or datetime.now(timezone.utc)
 
                     if not ui_attached:
-                        if event_type in {"chunk", "complete"}:
-                            state.pending_stream_events.setdefault(thread_id, []).append((event_type, payload))
                         await _apply_event_to_persisted_timeline(state, thread_id, event_type, payload)
-                        if event_type == "ai_message":
-                            _clear_pending_chunk_events(state, thread_id)
                         stream_task = asyncio.create_task(stream_iter.__anext__())
                         continue
 

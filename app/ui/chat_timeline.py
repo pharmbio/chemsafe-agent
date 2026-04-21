@@ -225,7 +225,14 @@ def process_ai_message(state: UIState, agent_name: Optional[str], message: Any, 
     updated = False
 
     text = _coerce_text(getattr(message, "content", None))
-    stream_entry = state.streaming_message_lookup.get(str(message_id))
+    primary_stream_key = str(message_id)
+    fallback_stream_key = f"{agent_key}:{block['block_id']}:stream"
+    stream_entry = state.streaming_message_lookup.get(primary_stream_key) or state.streaming_message_lookup.get(
+        fallback_stream_key
+    )
+    if stream_entry and primary_stream_key not in state.streaming_message_lookup:
+        state.streaming_message_lookup[primary_stream_key] = stream_entry
+        state.streaming_message_lookup.pop(fallback_stream_key, None)
     if text:
         if stream_entry and stream_entry.get("block_id") == block["block_id"]:
             idx = stream_entry.get("item_index")
@@ -633,6 +640,10 @@ def _format_tool_result_content(raw_content: Any, tool_name: Optional[str]) -> T
         code = _maybe_extract_code_from_result(raw_content)
         if code:
             return _render_code_block(code, language="python"), True
+    if tool_name == "read_files":
+        if isinstance(raw_content, (dict, list)):
+            return _render_code_block(json.dumps(raw_content, indent=2), language="text"), True
+        return _render_code_block(str(raw_content), language="text"), True
     if isinstance(raw_content, (dict, list)):
         return _render_code_block(json.dumps(raw_content, indent=2), language="json"), True
     return str(raw_content), False
