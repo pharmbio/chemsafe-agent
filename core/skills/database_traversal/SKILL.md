@@ -17,7 +17,7 @@ PubChem is the broadest source: GHS classification, physical properties, toxicit
 
 The correct traversal pattern is recursive search through `record["Record"]["Section"]`, descending into `section["Section"]` children, collecting any section whose `TOCHeading` matches the target content. Text lives at leaf nodes inside `section["Information"][*]["Value"]["StringWithMarkup"][*]["String"]`.
 
-Read `references/pubchem.md` for the full access pattern and extraction code.
+Read `core/skills/database_trversal/references/pubchem.md` for the full access pattern and extraction code.
 
 ### NIOSH NPG — HTML Index + Detail Page Scraping
 
@@ -25,7 +25,7 @@ NIOSH is the authoritative source for occupational safety: REL/IDLH exposure lim
 
 The correct approach is to load the index table once into a DataFrame and reuse it across queries — not to re-fetch per compound. Detail pages are unstructured HTML; the extraction strategy is text-block slicing between known section title strings, not CSS/XPath selectors.
 
-Read `references/niosh.md` for scraping patterns and section extraction.
+Read `core/skills/database_trversal/references/niosh.md` for scraping patterns and section extraction.
 
 ### OPCW — Embedded Power BI API
 
@@ -33,7 +33,7 @@ OPCW covers chemical weapons convention scheduled compounds. The data is served 
 
 OPCW does not support per-compound queries — the entire compound list must be fetched and filtered locally. Treat the fetched DataFrame as an in-memory lookup table.
 
-Read `references/opcw.md` for the full payload, headers, and DSR parser.
+Read `core/skills/database_trversal/references/opcw.md` for the full payload, headers, and DSR parser.
 
 ---
 
@@ -50,14 +50,3 @@ Read `references/opcw.md` for the full payload, headers, and DSR parser.
 **For batch queries, process sequentially.** None of these sources have rate limits that require parallelism — sequential processing avoids hammering APIs and keeps error handling simple. Return a `pd.DataFrame` from batch functions so results are immediately usable downstream.
 
 **Cache index data within a session.** NIOSH and OPCW return full datasets (the NIOSH index table, the OPCW compound list) that should be loaded once and reused, not re-fetched per compound.
-
----
-
-## Reference Files
-
-| File | Read when... |
-|---|---|
-| `references/pubchem.md` | Querying PubChem REST API or extracting LCSS/safety sections |
-| `references/niosh.md` | Scraping NIOSH NPG index or detail pages |
-| `references/opcw.md` | Querying OPCW via the Power BI endpoint |
-| `references/id_resolution.md` | Resolving names, CAS numbers, or synonyms across any source |
