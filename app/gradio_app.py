@@ -9,6 +9,7 @@ import mimetypes
 import os
 import shutil
 import time
+import inspect
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from html import escape
@@ -1160,6 +1161,42 @@ _CONVERSATION_SCRIPT = """
         bus.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
+    function enforceLightTheme() {
+        const root = document.documentElement;
+        if (root) {
+            root.style.colorScheme = "light";
+            root.classList.remove("dark");
+            root.classList.add("light");
+        }
+        if (document.body) {
+            document.body.style.colorScheme = "light";
+            document.body.classList.remove("dark");
+            document.body.classList.add("light");
+        }
+        try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get("__theme") !== "light") {
+                url.searchParams.set("__theme", "light");
+                window.history.replaceState(window.history.state, "", url.toString());
+            }
+        } catch (error) {
+            console.warn("Unable to pin light theme", error);
+        }
+    }
+
+    function observeThemeLock() {
+        const root = document.documentElement;
+        if (!root || root.dataset.lightThemeLocked === "1") return;
+        root.dataset.lightThemeLocked = "1";
+        const syncTheme = () => window.requestAnimationFrame(enforceLightTheme);
+        const observer = new MutationObserver(syncTheme);
+        observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+        if (document.body) {
+            observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+        }
+        window.addEventListener("popstate", syncTheme);
+    }
+
     async function triggerDownload(anchor) {
         const url = anchor.getAttribute("href");
         if (!url) return;
@@ -1294,6 +1331,8 @@ _CONVERSATION_SCRIPT = """
     }
 
     function ensureReady() {
+        enforceLightTheme();
+        observeThemeLock();
         bindHandlers();
         initPartnerSliders();
     }
@@ -1311,6 +1350,7 @@ _CONVERSATION_SCRIPT = """
 def build_demo() -> gr.Blocks:
     extra_css = """
     :root {
+        color-scheme: light;
         --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         --font-editorial: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
         --page-bg: #f8f8f8;
@@ -1331,13 +1371,10 @@ def build_demo() -> gr.Blocks:
         --partner-card-width: 220px;
         --partner-card-gap: 1.15rem;
     }
-    body.dark {
-        --header-link-color: #f8fafc;
-        --header-link-divider-color: rgba(248, 250, 252, 0.65);
-        --header-link-hover-color: #8ec3e4;
-    }
+    html,
     body,
     .gradio-container {
+        color-scheme: light !important;
         font-family: var(--font-ui);
         background: var(--page-bg);
         color: var(--text-main);
@@ -2170,7 +2207,10 @@ def create_fastapi_app() -> FastAPI:
     demo = build_demo()
     fastapi_app = FastAPI(title=APP_TITLE, lifespan=_app_lifespan)
     fastapi_app.include_router(FILES_ROUTER)
-    return gr.mount_gradio_app(fastapi_app, demo, path="/")
+    mount_kwargs = {"path": "/"}
+    if "footer_links" in inspect.signature(gr.mount_gradio_app).parameters:
+        mount_kwargs["footer_links"] = ["api", "gradio"]
+    return gr.mount_gradio_app(fastapi_app, demo, **mount_kwargs)
 
 
 def launch() -> None:
