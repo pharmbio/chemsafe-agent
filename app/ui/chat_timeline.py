@@ -269,6 +269,41 @@ def process_tool_result(state: UIState, agent_name: Optional[str], call_id: Any,
     return _ingest_tool_result_event(state, agent_name, call_id, result)
 
 
+def _append_streaming_text(state: UIState, agent_name: str, chunk: Any) -> bool:
+    agent_key = (agent_name or "assistant").lower()
+    text = _coerce_stream_text(getattr(chunk, "content", None) if chunk is not None else None)
+    if not text:
+        return False
+
+    message_id = getattr(chunk, "id", None)
+    if isinstance(chunk, dict):
+        message_id = message_id or chunk.get("id")
+
+    block = _ensure_agent_block(state, agent_key)
+    lookup_key = str(message_id) if message_id else f"{agent_key}:{block['block_id']}:stream"
+    stream_entry = state.streaming_message_lookup.get(lookup_key)
+
+    if stream_entry and stream_entry.get("block_id") == block["block_id"]:
+        idx = stream_entry.get("item_index")
+        if idx is not None and idx < len(block["items"]):
+            block["items"][idx]["content"] += text
+        else:
+            block["items"].append({"type": "message", "content": text})
+            state.streaming_message_lookup[lookup_key] = {
+                "block_id": block["block_id"],
+                "item_index": len(block["items"]) - 1,
+            }
+    else:
+        block["items"].append({"type": "message", "content": text})
+        state.streaming_message_lookup[lookup_key] = {
+            "block_id": block["block_id"],
+            "item_index": len(block["items"]) - 1,
+        }
+
+    _refresh_block_message(state, block["block_id"])
+    return True
+
+
 def _update_tool_call_item(block: Dict[str, Any], call: Any, *, call_id: Optional[Any] = None) -> bool:
     """Insert or update a tool_call item on a block."""
     resolved_id = call_id or getattr(call, "id", None)
@@ -308,6 +343,9 @@ def _update_tool_call_item(block: Dict[str, Any], call: Any, *, call_id: Optiona
 
 def _ingest_message(state: UIState, raw_msg: Any, agent_name: Optional[str]) -> bool:
     role = _get_role(raw_msg)
+    if _is_ai_stream_chunk(raw_msg, role):
+        return _append_streaming_text(state, agent_name or getattr(raw_msg, "name", None) or "assistant", raw_msg)
+
     if role in {"human", "user"}:
         msg_id = _derive_message_id(raw_msg)
         if msg_id:
@@ -654,11 +692,34 @@ def _coerce_text(content: Any) -> str:
     return str(content).strip()
 
 
+def _coerce_stream_text(content: Any) -> str:
+    """Coerce streamed token content without trimming whitespace."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(item.get("text", ""))
+        return "".join(parts)
+    if isinstance(content, dict) and content.get("type") == "text":
+        return str(content.get("text", ""))
+    return str(content)
+
+
 def _get_role(msg: Any) -> str:
     role = getattr(msg, "type", None) or getattr(msg, "role", None)
     if isinstance(msg, dict):
         role = role or msg.get("type") or msg.get("role")
     return str(role or "").lower()
+
+
+def _is_ai_stream_chunk(msg: Any, role: str) -> bool:
+    class_name = type(msg).__name__.lower()
+    role_value = str(role or "").lower()
+    return class_name == "aimessagechunk" or role_value == "aimessagechunk"
 
 
 def _build_metadata(agent_name: str, block_id: str) -> Dict[str, Any]:
