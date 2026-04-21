@@ -1802,9 +1802,19 @@ def build_demo() -> gr.Blocks:
     #chatbot-panel [data-testid*="assistant"] {
         background: #fff !important;
     }
-    #chatbot-panel [data-testid*="user"] {
+    #chatbot-panel .bubble.user-row {
         background: #f4f7f9 !important;
         border: 1px solid #d8e2e7 !important;
+        box-shadow: none !important;
+        padding: 0.65rem 0.9rem !important;
+    }
+    #chatbot-panel .bubble.user-row .user,
+    #chatbot-panel .bubble.user-row .message.user,
+    #chatbot-panel .bubble.user-row .message.user > div {
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
     }
     #chatbot-panel code,
     #chatbot-panel pre,
