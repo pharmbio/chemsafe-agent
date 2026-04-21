@@ -84,7 +84,16 @@ for query in queries:
     # Deduplicate downstream by SOP/source identifier.
 ```
 
-Actively modify threshold and max_results depends on the situation.
+Adapt `score_threshold` and `max_results` to the situation.
+
+If the current query set returns nothing or clearly misses an important dimension:
+
+- Rerun with revised queries before concluding the SOP is missing.
+- Loosen `score_threshold` in controlled steps when the first pass is too strict.
+- Broaden or rephrase queries using adjacent terminology such as hazard class,
+  synonym, incident type, or procedure wording.
+- Record that a fallback retrieval pass was needed so downstream reviewers know the
+  search required expansion.
 
 ---
 
@@ -120,7 +129,12 @@ before taking any action or producing any output.
 
 ## Step 6 — Handle Missing SOPs
 
-If retrieval returns no relevant SOPs after all queries are exhausted:
+If retrieval returns no relevant SOPs after the initial query set:
+
+- Perform one fallback pass with revised queries and/or a looser `score_threshold`.
+- Only treat the SOP as missing after that expanded pass still returns nothing relevant.
+
+If retrieval still returns no relevant SOPs after all queries and fallback passes are exhausted:
 
 - ⚠️ No matching SOP found for domain: `<domain>`.
 - Do not proceed without validated procedures. Escalate to the chemical safety officer immediately — acting without SOP backing in a chemical safety context is not permitted.
