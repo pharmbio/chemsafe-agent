@@ -331,6 +331,19 @@ def _drain_pending_stream_events(state: UIState, thread_id: Optional[str]) -> bo
     return updated
 
 
+def _clear_pending_chunk_events(state: UIState, thread_id: Optional[str]) -> None:
+    if not thread_id:
+        return
+    buffer = state.pending_stream_events.get(thread_id)
+    if not buffer:
+        return
+    retained = [(event_type, payload) for event_type, payload in buffer if event_type != "chunk"]
+    if retained:
+        state.pending_stream_events[thread_id] = retained
+    else:
+        state.pending_stream_events.pop(thread_id, None)
+
+
 def _sanitize_filename(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in (" ", ".", "_", "-")).strip() or "file"
 
@@ -509,7 +522,7 @@ async def _persist_timeline_snapshot(thread_id: Optional[str], state: UIState) -
 
 
 async def _apply_event_to_persisted_timeline(state: UIState, thread_id: Optional[str], event_type: str, payload: Any) -> None:
-    if not thread_id or not state.user_id or event_type == "complete":
+    if not thread_id or not state.user_id or event_type in {"chunk", "complete"}:
         return
     snapshot = await load_timeline(state.user_id, thread_id)
     timeline_state = UIState()
@@ -522,7 +535,7 @@ async def _apply_event_to_persisted_timeline(state: UIState, thread_id: Optional
 
 async def _refresh_conversation(state: UIState, thread_id: str) -> None:
     state.current_thread_id = thread_id
-    state.selected_thread_id = thread_id
+    state.stale_threads.discard(thread_id)
     state.processed_message_ids = set()
     state.processed_tools_ids = set()
     state.processed_content_hashes = set()
@@ -537,6 +550,7 @@ async def _refresh_conversation(state: UIState, thread_id: str) -> None:
         reset_chat_messages(state)
     state.ensure_thread_storage(thread_id)
     await _refresh_thread_files_for(state, thread_id)
+    state.uploaded_files = [record for record in state.thread_files.get(thread_id, []) if _is_data_path(record.path)]
 
 
 async def _sync_user_threads(state: UIState, ensure_one: bool = True) -> None:
@@ -559,6 +573,11 @@ async def _sync_user_threads(state: UIState, ensure_one: bool = True) -> None:
     for thread_id in valid_ids:
         state.ensure_thread_storage(thread_id)
         await _refresh_thread_files_for(state, thread_id)
+
+    state.stale_threads = {thread_id for thread_id in state.stale_threads if thread_id in valid_ids}
+    for thread_id in list(state.pending_stream_events):
+        if thread_id not in valid_ids:
+            state.pending_stream_events.pop(thread_id, None)
 
     if state.current_thread_id not in valid_ids:
         state.current_thread_id = state.thread_ids[0]["thread_id"] if state.thread_ids else None
@@ -725,6 +744,7 @@ async def on_logout(state: UIState):
 async def _activate_thread(thread_id: Optional[str], state: UIState):
     if not thread_id or thread_id not in {thread["thread_id"] for thread in state.thread_ids}:
         return state, _conversation_panel_update(state), list(state.messages), gr.update(value="")
+    state.selected_thread_id = thread_id
     await _refresh_conversation(state, thread_id)
     _drain_pending_stream_events(state, thread_id)
     state.waiting_for_approval = False
@@ -744,6 +764,8 @@ async def on_new_task(state: UIState):
     state.selected_thread_id = meta.thread_id
     state.thread_ids.insert(0, _thread_to_dict(meta))
     state.thread_files[meta.thread_id] = []
+    state.pending_stream_events.pop(meta.thread_id, None)
+    state.stale_threads.discard(meta.thread_id)
     state.uploaded_files = []
     reset_chat_messages(state)
     state.waiting_for_approval = False
@@ -860,6 +882,7 @@ async def _run_user_message_internal(prompt: str, state: UIState):
     yield state, list(state.messages), gr.update(value=""), _conversation_panel_update(state)
 
     thread_id = state.current_thread_id
+    state.selected_thread_id = thread_id
     state.running_threads.add(thread_id)
     state.stop_signals[thread_id] = False
     try:
@@ -874,17 +897,40 @@ async def _run_user_message_internal(prompt: str, state: UIState):
             thread_id,
             check_for_interrupts=True,
         )
-        stream_task = asyncio.create_task(stream_iter.__anext__())
-        poll_task = asyncio.create_task(asyncio.sleep(FILE_LIST_REFRESH_INTERVAL_SECONDS))
         stream_iter_closed = False
+        stream_task = asyncio.create_task(stream_iter.__anext__())
+        poll_task = (
+            asyncio.create_task(asyncio.sleep(FILE_LIST_REFRESH_INTERVAL_SECONDS))
+            if thread_id
+            else None
+        )
+        ui_attached = True
+        stopped = False
         try:
             while stream_task:
-                done, _ = await asyncio.wait([stream_task, poll_task], return_when=asyncio.FIRST_COMPLETED)
+                wait_tasks = [stream_task]
+                if poll_task:
+                    wait_tasks.append(poll_task)
+                done, _ = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
 
                 selected_thread = state.selected_thread_id or state.current_thread_id
-                ui_attached = selected_thread == thread_id
+                is_active_thread = selected_thread == thread_id
+                if is_active_thread and not ui_attached:
+                    await _refresh_conversation(state, thread_id)
+                    updated = _drain_pending_stream_events(state, thread_id)
+                    if updated:
+                        yield (
+                            state,
+                            list(state.messages),
+                            gr.update(value=""),
+                            _conversation_panel_update(state),
+                        )
+                    ui_attached = True
+                elif not is_active_thread:
+                    state.stale_threads.add(thread_id)
+                    ui_attached = False
 
-                if poll_task in done:
+                if poll_task and poll_task in done:
                     poll_task = asyncio.create_task(asyncio.sleep(FILE_LIST_REFRESH_INTERVAL_SECONDS))
                     if ui_attached and await _refresh_thread_files_for(state, thread_id):
                         yield state, list(state.messages), gr.update(value=""), _conversation_panel_update(state)
@@ -896,8 +942,18 @@ async def _run_user_message_internal(prompt: str, state: UIState):
                         stream_task = None
                         break
                     except Exception as exc:
-                        updated = _record_stream_error(state, exc)
-                        await _persist_timeline_snapshot(thread_id, state)
+                        if ui_attached:
+                            updated = _record_stream_error(state, exc)
+                            await _persist_timeline_snapshot(thread_id, state)
+                        else:
+                            timeline_state = UIState()
+                            snapshot = await load_timeline(state.user_id, thread_id) if state.user_id else None
+                            if isinstance(snapshot, dict):
+                                rebuild_from_timeline_snapshot(timeline_state, snapshot)
+                            updated = _record_stream_error(timeline_state, exc)
+                            if updated and state.user_id:
+                                await save_timeline(state.user_id, thread_id, export_timeline_snapshot(timeline_state))
+                            _clear_pending_chunk_events(state, thread_id)
                         if ui_attached and updated:
                             yield (
                                 state,
@@ -907,26 +963,31 @@ async def _run_user_message_internal(prompt: str, state: UIState):
                             )
                         if stream_task:
                             stream_task = None
-                        poll_task.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await poll_task
-                        poll_task = None
+                        if poll_task:
+                            poll_task.cancel()
+                            with suppress(asyncio.CancelledError):
+                                await poll_task
+                            poll_task = None
                         with suppress(Exception):
                             await stream_iter.aclose()
                         stream_iter_closed = True
                         break
 
-                    if not ui_attached:
-                        state.pending_stream_events.setdefault(thread_id, []).append((event_type, payload))
-                        await _apply_event_to_persisted_timeline(state, thread_id, event_type, payload)
-                        stream_task = asyncio.create_task(stream_iter.__anext__())
-                        continue
-
-                    updated = _apply_stream_event(event_type, payload, state)
                     if event_type == "complete":
                         interrupted, completed_at = _parse_complete_payload(payload)
                         if not interrupted:
                             state.last_run_at[thread_id] = completed_at or datetime.now(timezone.utc)
+
+                    if not ui_attached:
+                        if event_type in {"chunk", "complete"}:
+                            state.pending_stream_events.setdefault(thread_id, []).append((event_type, payload))
+                        await _apply_event_to_persisted_timeline(state, thread_id, event_type, payload)
+                        if event_type == "ai_message":
+                            _clear_pending_chunk_events(state, thread_id)
+                        stream_task = asyncio.create_task(stream_iter.__anext__())
+                        continue
+
+                    updated = _apply_stream_event(event_type, payload, state)
                     if updated:
                         await _persist_timeline_snapshot(thread_id, state)
                         await _refresh_thread_files_for(state, thread_id)
@@ -934,17 +995,20 @@ async def _run_user_message_internal(prompt: str, state: UIState):
                     stream_task = asyncio.create_task(stream_iter.__anext__())
 
                 if state.stop_signals.get(thread_id):
+                    stopped = True
                     state.waiting_for_approval = False
                     state.approval_interrupted = False
+                    state.current_app_config = None
                     if stream_task:
                         stream_task.cancel()
                         with suppress(asyncio.CancelledError):
                             await stream_task
                         stream_task = None
-                    poll_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await poll_task
-                    poll_task = None
+                    if poll_task:
+                        poll_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await poll_task
+                        poll_task = None
                     with suppress(Exception):
                         await stream_iter.aclose()
                     stream_iter_closed = True
@@ -965,8 +1029,11 @@ async def _run_user_message_internal(prompt: str, state: UIState):
         state.running_threads.discard(thread_id)
         state.stop_signals.pop(thread_id, None)
 
-    if state.current_thread_id == thread_id:
-        await _refresh_thread_files_for(state, thread_id)
+    selected_thread = state.selected_thread_id or state.current_thread_id
+    is_active_thread = selected_thread == thread_id
+    if not is_active_thread:
+        state.stale_threads.add(thread_id)
+    elif not stopped and await _refresh_thread_files_for(state, thread_id):
         yield state, list(state.messages), gr.update(value=""), _conversation_panel_update(state)
 
 
@@ -1705,6 +1772,12 @@ def build_demo() -> gr.Blocks:
     .tool-code-block pre,
     details.tool-block pre {
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace !important;
+    }
+    .agent-message-inline {
+        margin: 0.9rem 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text-main);
     }
     details.tool-block {
         border: 1px solid var(--border-subtle);

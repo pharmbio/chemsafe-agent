@@ -162,6 +162,22 @@ async def stream_langgraph_events(
                             payload = {"messages": [chunk]}
                         yield ("chunk", {agent_name: payload})
                     else:
+                        # LangGraph emits both a node-local chunk (with langgraph_node
+                        # metadata) and a graph-level aggregate wrapper for the same
+                        # message payload. The wrapper causes duplicate persistence when
+                        # a timeline is rebuilt into a fresh UIState, because processed
+                        # message ids are not restored from snapshot state. Skip these
+                        # aggregate wrappers and keep the node-local chunk as the single
+                        # source of truth.
+                        if (
+                            isinstance(chunk, dict)
+                            and chunk
+                            and all(
+                                isinstance(value, dict) and "messages" in value
+                                for value in chunk.values()
+                            )
+                        ):
+                            continue
                         yield ("chunk", chunk)
 
             interrupted = False
