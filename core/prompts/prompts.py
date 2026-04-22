@@ -8,6 +8,9 @@ EXECUTE_SKILLS = [
     "database_traversal",
     "data_visualization",
     "sop_search",
+    "literature_search",
+    "woe_reasoning",
+    "cheminformatics"
 ]
 EXECUTE_SKILLS_BLOCK = format_skill_summaries(EXECUTE_SKILLS)
 
