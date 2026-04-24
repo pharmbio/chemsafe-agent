@@ -16,9 +16,9 @@ Do not skip steps. Regulators reject WoE dossiers most often for undocumented we
 Before any evidence is inspected, pin down the assessment question in writing. Post-hoc framing is the single most common reason a WoE conclusion is overturned on review.
 
 Record:
-- **Substance** (name, CAS, EC, SMILES; purity/composition if relevant).
+- **Substance** (name, CAS, EC, SMILES; purity/composition if relevant/quantity or volume if relevant).
 - **Endpoint and scope** — e.g. "STOT-RE hazard classification under CLP Annex I," "PBT assessment under REACH Annex XIII," "read-across justification for chronic oral toxicity from analogue X."
-- **Regulatory trigger** — REACH registration, CLP self-classification, BPR active substance approval, PPPR, endocrine disruptor identification, etc
+- **Regulatory trigger** — REACH registration, CLP self-classification, BPR active substance approval, PPPR, endocrine disruptor identification, etc.
 - **Population/exposure context** — species, route, duration, life stage.
 - **Pre-specified weighting scheme** — which scoring tool will be applied to each evidence type (see Step 3). Choosing the tool *after* seeing results is cherry-picking.
 - **Decision rule** — what pattern of evidence would lead to each possible conclusion, stated before inspecting data.
@@ -37,12 +37,14 @@ Collect **all** potentially relevant evidence across the canonical lines. Missin
 |---|-----------------------|---------------------------------------------------------------------|----------------------------------------------------------|
 | 1 | Human data            | Epidemiology, case reports, biomonitoring, clinical                 | `database_traversal`,  `literature_search` |
 | 2 | In vivo animal        | OECD TG studies, non-guideline studies                              | Uploaded studies, `database_traversal`,  `literature_search`     |
-| 3 | In vitro              | Mechanistic assays, ToxCast/Tox21, OECD TG in vitro                 | `database_traversal`, uploads                            |
-| 4 | In silico (QSAR)      | QSAR predictions, PBPK, profilers                                   | Uploaded QSAR outputs; model card required (see Step 3)  |
-| 5 | Read-across / grouping| Analogue or category data                                           | RAAF justification (Step 3)                              |
-| 6 | Physicochemical       | logP, water solubility, vapor pressure, pKa, hydrolysis             | `database_traversal`              |
+| 3 | In vitro              | Mechanistic assays, ToxCast/Tox21, OECD TG in vitro, EnviroTox or ADORE                 | `database_traversal`, uploads                            |
+| 4 | In silico (QSAR)      | QSAR predictions, PBPK, profilers                                   | Uploaded QSAR outputs; model card required (see Step 3), pre-trained models (VEGA)  |
+| 5 | Read-across / grouping| Analogue or category data, chemical scaffolds                                           | RAAF justification (Step 3)                              |
+| 6 | Physicochemical       | logP, water solubility, vapor pressure, pKa, hydrolysis, flash point, lower explosive limit (LEL), upper explosive limit (UEL), autoignition temperature, boiling point
+melting point, pH, color, odor, physical state             | `database_traversal` ,  `literature_search`             |
 | 7 | Mechanistic / AOP     | Molecular initiating events, key events, AOP-Wiki                   | `database_traversal`,`literature_search`                        |
 | 8 | Exposure / kinetics   | ADME, biomonitoring, PBPK                                           | `database_traversal`   ,  `literature_search`               |
+| 9 | Regulation | Chemical hazards,   Dossiers, Clasification, Regulatory context                                         | `database_traversal`   ,  `literature_search`               |
 
 ### Assembly rules
 
@@ -89,7 +91,7 @@ A QSAR prediction where the target is **outside the applicability domain** canno
 
 Score each entry for relevance to the pre-specified question on High / Medium / Low:
 - **Species / test system** relevance to the target species/population.
-- **Route, dose range, duration** relevance to the regulatory endpoint.
+- **Route, dose range, duration, quantity** relevance to the regulatory endpoint.
 - **Endpoint match** — does the study measure the exact apical endpoint, a surrogate, or an upstream key event?
 - **Chemical identity match** — target substance, analogue, mixture, impurity.
 
@@ -231,6 +233,6 @@ Before presenting the narrative, run this checklist. Any "fail" must be fixed, n
 - [ ] **Framework references cited** (EFSA 2017 at minimum). (Step 7)
 - [ ] **No use of "clearly," "obviously," "definitely"** in place of calibrated language. (Step 7)
 
-If the WoE conclusion affects a CMR classification, PBT/vPvB determination, endocrine disruptor identification, or any decision with direct human-health or environmental consequence, add a final line requesting expert human review before the output is treated as authoritative.
+If the WoE conclusion affects a CMR classification, PBT/vPvB determination, endocrine disruptor identification, chemical hazard, or any decision with direct human-health or environmental consequence, add a final line requesting expert human review before the output is treated as authoritative.
 
 ---
