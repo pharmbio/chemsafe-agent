@@ -88,7 +88,7 @@ def _validate_max_results(max_results: int | None) -> int:
         raise ValueError("max_results must be at least 1.")
     return value
 
-class SOPRetriever:
+class SectionWiseRetriever:
     def __init__(
         self,
         score_threshold: float | None = None,

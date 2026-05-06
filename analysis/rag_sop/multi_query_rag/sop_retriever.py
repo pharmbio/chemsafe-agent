@@ -97,6 +97,7 @@ class MultiQueryRetriever:
         score_threshold: float | None = None,
         max_results: int | None = None,
         search_type: str | None = None,
+        num_queries: int = 5
     ):
         self.retriever = None
         self._api_key = _require_openai_api_key()
@@ -104,6 +105,7 @@ class MultiQueryRetriever:
         self.max_results = _validate_max_results(max_results)
         self.search_type = _normalize_search_type(search_type)
         self.search_kwargs = self._build_search_kwargs()
+        self.num_queries = num_queries
         self._initialize()
 
     def _build_search_kwargs(self) -> Dict[str, Any]:
@@ -157,30 +159,6 @@ class MultiQueryRetriever:
         print(f"MultiVectorRetriever created with vectorstore and docstore")
         print(f"Docstore contains {len(list(docstore.yield_keys()))} documents")
 
-    
-    def multi_query_construction(self, query, k=5, llm=None):
-        """Build multiple queries from the original query"""
-        if llm is None:
-            llm = ChatOpenAI(model="gpt-5.4-mini", temperature=0)
-        
-        prompt = f"""You are an AI language model assistant. Your task is to generate {k} different versions of the given user 
-    question to retrieve relevant documents from a vector database. By generating multiple perspectives on the user question, 
-    your goal is to help the user overcome some of the limitations of distance-based similarity search. Provide these alternative
-    questions separated by newlines. Original question: {query}"""
-        
-        response = llm.invoke(prompt)
-        lines = response.content.strip().split("\n")
-        return [line.strip() for line in lines if line.strip()]
-
-    def query(self, query):
-        """Submit multiple_query, get results and reranks using functions"""
-        #Step 1: Submit multiple query
-        #Step 2: get doc for each query
-        #Step 3: Rerank and only take top k (max_results)
-
-
-
-    
     def _convert_bytes_to_docs(self, retrieved_items: List[Any]) -> List[Any]:
         """Convert bytes from docstore back to Document objects."""
         documents = []
@@ -221,3 +199,63 @@ class MultiQueryRetriever:
             except Exception:
                 text.append(doc)
         return {"images": b64, "texts": text}
+
+    
+    def multi_query_construction(self, query: str, llm=None) -> List[str]:
+        """Build multiple alternative phrasings of the original query."""
+        num_queries = self.num_queries
+
+        if llm is None:
+            llm = ChatOpenAI(model="gpt-5-nano", temperature=0, api_key=self._api_key)
+
+        prompt = (f"You are an AI language model assistant. Your task is to generate {num_queries} different versions of the given"
+        "user question to retrieve relevant documents from a vector database." 
+        "By generating multiple perspectives on the user question,"
+        "your goal is to help the user overcome some of the limitations of distance-based similarity search. Provide these alternative"
+        "questions separated by newlines. "
+        f"Original question: {query}")
+
+
+        response = llm.invoke(prompt)
+        lines = response.content.strip().split("\n")
+        variants = [line.strip(" -*0123456789.\t") for line in lines if line.strip()] # Sometimes LLM add the bullet number
+
+        if query not in variants:
+            variants.append(query) # Keep original query also
+        return variants
+
+    def submit_queries(self, query_list: List[str]) -> List[Dict[str, Any]]:
+        """Run each query through the retriever and collect ranked hits."""
+        ranked_hits = []
+        for query in query_list:
+            documents = self.retriever.invoke(query)
+            documents = self._convert_bytes_to_docs(documents)
+            for rank, doc in enumerate(documents):
+                ranked_hits.append({"doc": doc, "rank": rank, "query": query})
+        return ranked_hits
+
+    def re_rank(self, ranked_hits: List[Dict[str, Any]], rrf_k: int = 60) -> List[Document]:
+        """Fuse per-query ranked lists with Reciprocal Rank Fusion.
+
+        Score for a doc = sum over queries of 1 / (rrf_k + rank).
+        rrf_k=60 follows the original RRF paper; it dampens any single high
+        rank so docs surfaced by multiple queries rise to the top.
+        """
+        scores: Dict[str, float] = {}
+        docs_by_id: Dict[str, Document] = {}
+
+        for hit in ranked_hits:
+            doc = hit["doc"]
+            doc_id = doc.metadata["doc_id"]
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (rrf_k + hit["rank"])
+            docs_by_id.setdefault(doc_id, doc)
+
+        top_ids = sorted(scores, key=scores.get, reverse=True)[: self.max_results]
+        return [docs_by_id[doc_id] for doc_id in top_ids]
+
+    def query(self, query: str) -> List[Document]:
+        """End-to-end: expand the query, retrieve, fuse, and return top results."""
+        query_list = self.multi_query_construction(query)
+        ranked_hits = self.submit_queries(query_list)
+        top_docs = self.re_rank(ranked_hits)
+        return top_docs
