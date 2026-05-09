@@ -206,7 +206,7 @@ class MultiQueryRetriever:
         num_queries = self.num_queries
 
         if llm is None:
-            llm = ChatOpenAI(model="gpt-5-nano", temperature=0, api_key=self._api_key)
+            llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0, api_key=self._api_key)
 
         prompt = (f"You are an AI language model assistant. Your task is to generate {num_queries} different versions of the given"
         "user question to retrieve relevant documents from a vector database." 

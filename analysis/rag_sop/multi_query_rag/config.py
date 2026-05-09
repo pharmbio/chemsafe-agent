@@ -36,14 +36,7 @@ DATA_DIR = WORKSPACE_ROOT
 MEMORY_DIR = MULTI_QUERY_RAG_DIR / "sop_documents"
 
 # SOP input documents live next to the notebook by default.
-_preferred_sop_dir = DATA_DIR / "SOPs"
-_legacy_sop_dir = DATA_DIR / "SOP"
-if _preferred_sop_dir.exists():
-    SOP_DATA_DIR = _preferred_sop_dir
-elif _legacy_sop_dir.exists():
-    SOP_DATA_DIR = _legacy_sop_dir
-else:
-    SOP_DATA_DIR = _preferred_sop_dir
+SOP_DATA_DIR = DATA_DIR / "SOPs"
 
 SOP_MEMORY_DIR = MEMORY_DIR
 CHROMA_PERSIST_PATH = SOP_MEMORY_DIR / "chroma_db"
@@ -85,18 +78,3 @@ def ensure_directories() -> None:
     """Ensure all necessary local directories exist."""
     for directory in (SOP_DATA_DIR, SOP_MEMORY_DIR, CHROMA_PERSIST_PATH, DOCSTORE_DIR):
         directory.mkdir(parents=True, exist_ok=True)
-
-
-if __name__ == "__main__":
-    print("SOP RAG Configuration:")
-    print(f"Repository root: {REPO_ROOT}")
-    print(f"Workspace root: {WORKSPACE_ROOT}")
-    print(f"Section-wise RAG dir: {MULTI_QUERY_RAG_DIR}")
-    print(f"SOP data directory: {SOP_DATA_DIR}")
-    print(f"SOP memory directory: {SOP_MEMORY_DIR}")
-    print(f"ChromaDB path: {CHROMA_PERSIST_PATH}")
-    print(f"Docstore path: {DOCSTORE_DIR}")
-    print(f"Collection name: {COLLECTION_NAME}")
-
-    ensure_directories()
-    print("\nDirectories created successfully.")

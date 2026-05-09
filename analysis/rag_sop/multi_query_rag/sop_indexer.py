@@ -101,11 +101,11 @@ def extract_images_base64(chunks: List[Any]) -> List[str]:
                     images_b64.append(el.metadata.image_base64)
     return images_b64
 
-def create_text_table_summarizer() -> RunnableLambda:
-    """Create a chain for summarizing text and table content."""
+def create_table_summarizer() -> RunnableLambda:
+    """Create a chain for summarizing table content."""
     prompt_text_tables = """
-You are an assistant tasked with summarizing tables and text.
-Give a concise summary of the table or text.
+You are an assistant tasked with summarizing tables.
+Give a concise summary of the table.
 
 Respond only with the summary, no additional comment.
 Do not start your message by saying "Here is a summary" or anything like that.
@@ -253,7 +253,7 @@ def process_and_index_pdfs(directory: str) -> None:
     retriever = create_multi_vector_retriever()
     
     # Create summarizers
-    text_table_summarizer = create_text_table_summarizer()
+    text_table_summarizer = create_table_summarizer()
     image_summarizer = create_image_summarizer()
     
     total_texts = 0
@@ -272,11 +272,10 @@ def process_and_index_pdfs(directory: str) -> None:
             tables = content_types["tables"]
             images = extract_images_base64(chunks)
             
-            # Process texts
             if texts:
                 print(f"  - Processing {len(texts)} text chunks...")
-                text_summaries = text_table_summarizer.batch(texts)
-                add_content_to_retriever(retriever, texts, text_summaries)
+                text_contents = [t.text for t in texts]
+                add_content_to_retriever(retriever, texts, text_contents)
                 total_texts += len(texts)
             
             # Process tables
