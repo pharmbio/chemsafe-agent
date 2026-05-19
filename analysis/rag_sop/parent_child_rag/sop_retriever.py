@@ -67,15 +67,31 @@ class ParentChildRetriever:
         self,
         score_threshold: float | None = None,
         max_results: int | None = None,
+        lambda_mult: float | None = None,
+        fetch_k: int | None = None,
         search_type: str | None = None,
     ):
         self._api_key = _require_openai_api_key()
         self.search_type = _normalize_search_type(search_type)
         self.max_results = max_results if max_results is not None else RETRIEVAL_CONFIG["max_results"]
+
+        #in case search type is similairty_score_threshold
         self.score_threshold = (
             score_threshold if score_threshold is not None
             else RETRIEVAL_CONFIG["default_score_threshold"]
         )
+
+        # Used when search_type is "mmr".
+        self.lambda_mult = (
+            lambda_mult
+            if lambda_mult is not None
+            else RETRIEVAL_CONFIG["lambda_mult"]
+        )
+        self.fetch_k = (
+            fetch_k if fetch_k is not None else RETRIEVAL_CONFIG["fetch_k"]
+        )
+
+        # general
         self.search_kwargs = self._build_search_kwargs()
         self.retriever: ParentDocumentRetriever | None = None
         self._initialize()
@@ -84,6 +100,9 @@ class ParentChildRetriever:
         kwargs: Dict[str, Any] = {"k": self.max_results}
         if self.search_type == "similarity_score_threshold":
             kwargs["score_threshold"] = self.score_threshold
+        elif self.search_type == "mmr":
+            kwargs["fetch_k"] = self.fetch_k
+            kwargs["lambda_mult"] = self.lambda_mult
         return kwargs
 
     def _initialize(self) -> None:

@@ -70,6 +70,9 @@ RETRIEVAL_CONFIG = {
     "search_type": "similarity",
     "default_score_threshold": 0.3,
     "max_results": 6,
+    # Used when search_type is "mmr" (must be present in search_kwargs for MMR).
+    "fetch_k": 20,
+    "lambda_mult": 0.5,
 }
 
 
