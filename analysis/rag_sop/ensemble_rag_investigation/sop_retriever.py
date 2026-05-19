@@ -165,10 +165,10 @@ class EnsembleSOPRetriever:
         mode: str = "basic",
         score_threshold: float | None = None,
         max_results: int | None = None,
+        fetch_k: int | None = None,
         search_type: str | None = None,
         bm25_weight: float | None = None,
         dense_weight: float | None = None,
-        bm25_k: int | None = None,
         bm25_k1: float | None = None,
         bm25_b: float | None = None,
     ) -> None:
@@ -182,6 +182,13 @@ class EnsembleSOPRetriever:
         self.max_results = (
             RETRIEVAL_CONFIG["max_results"] if max_results is None else max_results
         )
+        if self.max_results < 1:
+            raise ValueError("max_results must be at least 1.")
+        self.fetch_k = (
+            RETRIEVAL_CONFIG["fetch_k"] if fetch_k is None else fetch_k
+        )
+        if self.fetch_k < self.max_results:
+            raise ValueError("fetch_k must be >= max_results.")
         self.score_threshold = (
             RETRIEVAL_CONFIG["default_score_threshold"]
             if score_threshold is None
@@ -195,9 +202,6 @@ class EnsembleSOPRetriever:
         )
         if self.bm25_weight == 0 and self.dense_weight == 0:
             raise ValueError("At least one of bm25_weight / dense_weight must be > 0.")
-        self.bm25_k = bm25_k if bm25_k is not None else ENSEMBLE_CONFIG["bm25_k"]
-        if self.bm25_k < 1:
-            raise ValueError("bm25_k must be at least 1.")
         self.bm25_k1 = (
             float(bm25_k1) if bm25_k1 is not None else ENSEMBLE_CONFIG["bm25_k1"]
         )
@@ -213,7 +217,7 @@ class EnsembleSOPRetriever:
         self._initialize()
 
     def _build_search_kwargs(self) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {"k": self.max_results}
+        kwargs: Dict[str, Any] = {"k": self.fetch_k}
         if self.search_type == "similarity_score_threshold":
             kwargs["score_threshold"] = self.score_threshold
         return kwargs
@@ -306,7 +310,7 @@ class EnsembleSOPRetriever:
             bm25_docs,
             bm25_params={"k1": self.bm25_k1, "b": self.bm25_b},
         )
-        bm25_retriever.k = self.bm25_k
+        bm25_retriever.k = self.fetch_k
 
         self.retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, dense_retriever],
@@ -320,7 +324,8 @@ class EnsembleSOPRetriever:
             f"dense={dense_count} ({self._paths['retriever_kind']}, "
             f"{self._paths['embedding_model']}), "
             f"sparse={len(bm25_docs)} BM25 docs (k1={self.bm25_k1}, b={self.bm25_b}), "
-            f"weights=[bm25={self.bm25_weight}, dense={self.dense_weight}]"
+            f"weights=[bm25={self.bm25_weight}, dense={self.dense_weight}], "
+            f"fetch_k={self.fetch_k}, max_results={self.max_results}"
         )
 
     def query(self, query: str) -> List[Document]:
