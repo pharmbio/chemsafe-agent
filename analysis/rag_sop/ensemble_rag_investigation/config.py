@@ -113,7 +113,6 @@ MODE_PATHS = {
 ENSEMBLE_CONFIG = {
     "bm25_weight": 0.5,
     "dense_weight": 0.5,
-    "bm25_k": 12,
     "bm25_k1": 1.5,
     "bm25_b": 0.75,
     "rrf_c": 60,
@@ -122,7 +121,10 @@ ENSEMBLE_CONFIG = {
 RETRIEVAL_CONFIG = {
     "search_type": "similarity",
     "default_score_threshold": 0.3,
-    "max_results": 12,
+    # Initial candidates pulled from each arm (BM25 and dense) before RRF fusion.
+    "fetch_k": 12,
+    # Final number of fused results returned to the caller.
+    "max_results": 5,
 }
 
 LLM_CONFIG = {
