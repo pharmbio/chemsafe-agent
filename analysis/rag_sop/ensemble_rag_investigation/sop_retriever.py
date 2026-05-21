@@ -16,9 +16,11 @@ import importlib.util
 import json
 import os
 import pickle
+
+import numpy as np
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 TMP_ROOT = Path(gettempdir()) / "safechem-agent"
 TMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -37,6 +39,17 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
+
+
+def min_max_scaling(scores: List[float]) -> List[float]:
+    if not scores:
+        return []
+    arr = np.asarray(scores, dtype=float)
+    s_min = float(arr.min())
+    s_max = float(arr.max())
+    if s_max == s_min:
+        return [1.0] * len(scores)
+    return ((arr - s_min) / (s_max - s_min)).tolist()
 
 
 def _load_local_config():
@@ -219,6 +232,8 @@ class EnsembleSOPRetriever:
 
         self.bm25_retriever: BM25Retriever | None = None
         self.dense_retriever: Any = None
+        self.dense_vectorstore: Chroma | None = None
+        self.dense_docstore: BaseStore[str, Document] | None = None
         self._initialize()
 
     def _build_search_kwargs(self) -> Dict[str, Any]:
@@ -288,7 +303,7 @@ class EnsembleSOPRetriever:
         else:
             raise ValueError(f"Unknown retriever_kind '{kind}'")
 
-        return retriever, count
+        return retriever, count, vectorstore, docstore
 
     def _load_bm25_corpus(self) -> List[Document]:
         path: Path = self._paths["bm25_corpus"]
@@ -308,7 +323,9 @@ class EnsembleSOPRetriever:
         ]
 
     def _initialize(self) -> None:
-        dense_retriever, dense_count = self._build_dense_retriever()
+        dense_retriever, dense_count, vectorstore, docstore = self._build_dense_retriever()
+        self.dense_vectorstore = vectorstore
+        self.dense_docstore = docstore
 
         bm25_docs = self._load_bm25_corpus()
         bm25_retriever = BM25Retriever.from_documents(
@@ -341,25 +358,46 @@ class EnsembleSOPRetriever:
 
     def fuse(
         self,
-        ranked_lists: List[List[Document]],
-        weights: List[float],
+        ranked_lists: List[List[Document]] | None = None,
+        weights: List[float] | None = None,
+        scored_lists: List[List[Tuple[Document, float]]] | None = None,
     ) -> List[Document]:
-        """Fuse multiple ranked lists into one ordered list.
+        """Fuse multiple per-retriever result lists into one ordered list.
 
-        `ranked_lists[i]` is the per-retriever result (already ordered best→worst)
-        and `weights[i]` is its corresponding weight.
+        Rank-based fusers (rrf/borda/log_rank/condorcet) consume `ranked_lists`.
+        Score-based fusers (combsum) consume `scored_lists` (each entry a
+        list of (Document, raw_score) tuples, higher = better).
         """
+        if weights is None:
+            raise ValueError("weights is required.")
+
+        if self.fuse_func in ("combsum", "isrc", "log_odds"):
+            if scored_lists is None:
+                raise ValueError(f"fuse_func='{self.fuse_func}' requires scored_lists.")
+            if len(scored_lists) != len(weights):
+                raise ValueError("scored_lists and weights must have the same length.")
+            if self.fuse_func == "combsum":
+                return self._weighted_combsum(scored_lists, weights)
+            if self.fuse_func == "isrc":
+                return self._weighted_isrc(scored_lists, weights)
+            return self._weighted_log_odds(scored_lists, weights)
+
+        if ranked_lists is None:
+            raise ValueError(f"fuse_func='{self.fuse_func}' requires ranked_lists.")
         if len(ranked_lists) != len(weights):
             raise ValueError("ranked_lists and weights must have the same length.")
 
         if self.fuse_func == "rrf":
             return self._weighted_rrf(ranked_lists, weights)
+        elif self.fuse_func == "borda":
+            return self._weighted_borda(ranked_lists, weights)
+        elif self.fuse_func == "log_rank":
+            return self._weighted_log_rank(ranked_lists, weights)
+        elif self.fuse_func == "condorcet":
+            return self._weighted_condorcet(ranked_lists, weights)
         elif self.fuse_func == "linear":
             # Placeholder: weighted linear combination of normalized scores.
             raise NotImplementedError("fuse_func='linear' not implemented yet.")
-        elif self.fuse_func == "comb_sum":
-            # Placeholder: CombSUM over normalized retriever scores.
-            raise NotImplementedError("fuse_func='comb_sum' not implemented yet.")
         else:
             raise ValueError(f"Unknown fuse_func '{self.fuse_func}'.")
 
@@ -386,15 +424,273 @@ class EnsembleSOPRetriever:
         ordered_keys = sorted(scores, key=scores.get, reverse=True)
         return [first_seen[k] for k in ordered_keys]
 
+    def _weighted_borda(
+        self,
+        ranked_lists: List[List[Document]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Weighted Borda count fusion.
+
+        For each ranker i, a doc at rank r (1-indexed) contributes
+        w_i * (fetch_k - r + 1). Docs absent from a ranker get 0 from it.
+        """
+        n = self.fetch_k
+        scores: Dict[str, float] = {}
+        first_seen: Dict[str, Document] = {}
+
+        for docs, w in zip(ranked_lists, weights):
+            for rank, doc in enumerate(docs, start=1):
+                key = self._doc_key(doc)
+                scores[key] = scores.get(key, 0.0) + w * (n - rank + 1)
+                if key not in first_seen:
+                    first_seen[key] = doc
+
+        ordered_keys = sorted(scores, key=scores.get, reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
+    def _weighted_log_rank(
+        self,
+        ranked_lists: List[List[Document]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Weighted log-rank fusion.
+
+        score(d) = sum_i  -w_i * log10(rank_i(d))   (rank starts at 1)
+
+        Rank 1 contributes 0; deeper ranks contribute increasingly negative
+        amounts, so higher score = better. Docs absent from a ranker get 0
+        from it.
+        """
+        scores: Dict[str, float] = {}
+        first_seen: Dict[str, Document] = {}
+
+        for docs, w in zip(ranked_lists, weights):
+            for rank, doc in enumerate(docs, start=1):
+                key = self._doc_key(doc)
+                scores[key] = scores.get(key, 0.0) - w * float(np.log10(rank))
+                if key not in first_seen:
+                    first_seen[key] = doc
+
+        ordered_keys = sorted(scores, key=scores.get, reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
+    def _weighted_condorcet(
+        self,
+        ranked_lists: List[List[Document]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Weighted Condorcet fusion.
+
+        Pairwise weighted vote:
+            Condorcet(d_i, d_j) = sum_r  w_r * 1[rank_r(d_i) < rank_r(d_j)]
+
+        d_i wins the pair (d_i, d_j) iff Condorcet(d_i, d_j) > Condorcet(d_j, d_i).
+        Each doc's final score = number of pairwise wins.
+
+        Docs missing from a ranker are treated as ranked worse than any present
+        doc in that ranker (rank = +inf), contributing 0 to its own vote there.
+        """
+        first_seen: Dict[str, Document] = {}
+        rank_maps: List[Dict[str, int]] = []
+        for docs in ranked_lists:
+            rmap: Dict[str, int] = {}
+            for rank, doc in enumerate(docs, start=1):
+                key = self._doc_key(doc)
+                if key not in rmap:
+                    rmap[key] = rank
+                if key not in first_seen:
+                    first_seen[key] = doc
+            rank_maps.append(rmap)
+
+        keys = list(first_seen.keys())
+        wins: Dict[str, int] = {k: 0 for k in keys}
+
+        for a_idx in range(len(keys)):
+            for b_idx in range(a_idx + 1, len(keys)):
+                a, b = keys[a_idx], keys[b_idx]
+                vote_a = 0.0
+                vote_b = 0.0
+                for rmap, w in zip(rank_maps, weights):
+                    ra = rmap.get(a, np.inf)
+                    rb = rmap.get(b, np.inf)
+                    if ra < rb:
+                        vote_a += w
+                    elif rb < ra:
+                        vote_b += w
+                if vote_a > vote_b:
+                    wins[a] += 1
+                elif vote_b > vote_a:
+                    wins[b] += 1
+
+        ordered_keys = sorted(keys, key=lambda k: wins[k], reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
+    def _weighted_combsum(
+        self,
+        scored_lists: List[List[Tuple[Document, float]]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Weighted CombSUM over min-max normalized scores.
+
+            score(d) = sum_i  w_i * normalized_score_i(d)
+
+        Each arm's raw scores are min-max scaled to [0, 1] independently, then
+        summed with the arm's weight. Docs absent from an arm contribute 0
+        from that arm.
+        """
+        scores: Dict[str, float] = {}
+        first_seen: Dict[str, Document] = {}
+
+        for scored, w in zip(scored_lists, weights):
+            if not scored:
+                continue
+            raw = [s for _, s in scored]
+            normalized = min_max_scaling(raw)
+            for (doc, _), ns in zip(scored, normalized):
+                key = self._doc_key(doc)
+                scores[key] = scores.get(key, 0.0) + w * ns
+                if key not in first_seen:
+                    first_seen[key] = doc
+
+        ordered_keys = sorted(scores, key=scores.get, reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
+    def _weighted_isrc(
+        self,
+        scored_lists: List[List[Tuple[Document, float]]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Inverse-Square Rank with Score (ISRC).
+
+            score(d) = sum_i  w_i * normalized_score_i(d) / rank_i(d)^2
+
+        Each arm's raw scores are min-max scaled to [0, 1] independently;
+        rank starts at 1 (best). Docs absent from an arm contribute 0 from it.
+        """
+        scores: Dict[str, float] = {}
+        first_seen: Dict[str, Document] = {}
+
+        for scored, w in zip(scored_lists, weights):
+            if not scored:
+                continue
+            raw = [s for _, s in scored]
+            normalized = min_max_scaling(raw)
+            for rank, ((doc, _), ns) in enumerate(zip(scored, normalized), start=1):
+                key = self._doc_key(doc)
+                scores[key] = scores.get(key, 0.0) + w * ns / (rank * rank)
+                if key not in first_seen:
+                    first_seen[key] = doc
+
+        ordered_keys = sorted(scores, key=scores.get, reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
+    def _weighted_log_odds(
+        self,
+        scored_lists: List[List[Tuple[Document, float]]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Weighted log-odds fusion.
+
+            score(d) = sum_i  w_i * log( ns_i(d) / (1 - ns_i(d)) )
+
+        where ns_i is the min-max normalized score from arm i. Normalized
+        values are clipped into (eps, 1-eps) to keep the log and denominator
+        finite when min-max produces exactly 0 or 1.
+        """
+        eps = 1e-6
+        scores: Dict[str, float] = {}
+        first_seen: Dict[str, Document] = {}
+
+        for scored, w in zip(scored_lists, weights):
+            if not scored:
+                continue
+            raw = [s for _, s in scored]
+            normalized = min_max_scaling(raw)
+            clipped = np.clip(np.asarray(normalized, dtype=float), eps, 1.0 - eps)
+            log_odds = np.log(clipped / (1.0 - clipped))
+            for (doc, _), lo in zip(scored, log_odds):
+                key = self._doc_key(doc)
+                scores[key] = scores.get(key, 0.0) + w * float(lo)
+                if key not in first_seen:
+                    first_seen[key] = doc
+
+        ordered_keys = sorted(scores, key=scores.get, reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
+    def _bm25_with_scores(self, query: str) -> List[Tuple[Document, float]]:
+        """Top fetch_k (Document, BM25 score) pairs.
+
+        BM25Retriever doesn't expose scored results, but its `vectorizer`
+        (rank_bm25 BM25Okapi) and `preprocess_func` are public attributes; we
+        reuse them to recover the scores the retriever computes internally.
+        """
+        retriever = self.bm25_retriever
+        if retriever is None:
+            raise RuntimeError("BM25 retriever not initialized.")
+        processed = retriever.preprocess_func(query)
+        all_scores = np.asarray(retriever.vectorizer.get_scores(processed), dtype=float)
+        top_idx = np.argsort(all_scores)[::-1][: self.fetch_k]
+        return [(retriever.docs[int(i)], float(all_scores[int(i)])) for i in top_idx]
+
+    def _dense_with_scores(self, query: str) -> List[Tuple[Document, float]]:
+        """Top fetch_k (parent Document, similarity score) pairs.
+
+        ParentDocumentRetriever / MultiVectorRetriever don't surface per-parent
+        scores, so we call the vectorstore's `similarity_search_with_score`
+        directly on the child collection, convert distance → similarity
+        (-distance, higher = better), aggregate per parent doc_id by max
+        similarity, then load parents from the docstore.
+        """
+        vectorstore = self.dense_vectorstore
+        docstore = self.dense_docstore
+        if vectorstore is None or docstore is None:
+            raise RuntimeError("Dense vectorstore/docstore not initialized.")
+
+        # Over-fetch children so distinct parents can reach fetch_k after dedup.
+        k_children = max(self.fetch_k * 4, self.fetch_k)
+        children = vectorstore.similarity_search_with_score(query, k=k_children)
+
+        parent_best: Dict[str, float] = {}
+        parent_order: List[str] = []
+        for child_doc, distance in children:
+            parent_id = (child_doc.metadata or {}).get(ID_KEY)
+            if parent_id is None:
+                continue
+            sim = -float(distance)
+            if parent_id not in parent_best:
+                parent_best[parent_id] = sim
+                parent_order.append(parent_id)
+            elif sim > parent_best[parent_id]:
+                parent_best[parent_id] = sim
+            if len(parent_order) >= self.fetch_k:
+                break
+
+        parent_ids = parent_order[: self.fetch_k]
+        parent_docs = docstore.mget(parent_ids)
+
+        out: List[Tuple[Document, float]] = []
+        for pid, pdoc in zip(parent_ids, parent_docs):
+            if pdoc is None:
+                continue
+            out.append((pdoc, parent_best[pid]))
+        return out
+
     def query(self, query: str) -> List[Document]:
         if self.bm25_retriever is None or self.dense_retriever is None:
             raise RuntimeError("Retriever not initialized.")
 
-        bm25_results = self.bm25_retriever.invoke(query)[: self.fetch_k]
-        dense_results = self.dense_retriever.invoke(query)[: self.fetch_k]
-
-        fused = self.fuse(
-            [bm25_results, dense_results],
-            [self.bm25_weight, self.dense_weight],
-        )
+        if self.fuse_func in ("combsum", "isrc", "log_odds"):
+            bm25_scored = self._bm25_with_scores(query)
+            dense_scored = self._dense_with_scores(query)
+            fused = self.fuse(
+                weights=[self.bm25_weight, self.dense_weight],
+                scored_lists=[bm25_scored, dense_scored],
+            )
+        else:
+            bm25_results = self.bm25_retriever.invoke(query)[: self.fetch_k]
+            dense_results = self.dense_retriever.invoke(query)[: self.fetch_k]
+            fused = self.fuse(
+                ranked_lists=[bm25_results, dense_results],
+                weights=[self.bm25_weight, self.dense_weight],
+            )
         return fused[: self.max_results]
