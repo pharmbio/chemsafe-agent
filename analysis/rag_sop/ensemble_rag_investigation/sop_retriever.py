@@ -25,7 +25,7 @@ TMP_ROOT.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(TMP_ROOT / "matplotlib"))
 os.environ.setdefault("XDG_CACHE_HOME", str(TMP_ROOT / "xdg-cache"))
 
-from langchain_classic.retrievers import EnsembleRetriever, ParentDocumentRetriever
+from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.retrievers.multi_vector import MultiVectorRetriever
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
 from langchain_community.retrievers import BM25Retriever
@@ -162,7 +162,7 @@ class EnsembleSOPRetriever:
 
     def __init__(
         self,
-        mode: str = "basic",
+        mode: str = "parent_child",
         score_threshold: float | None = None,
         max_results: int | None = None,
         fetch_k: int | None = None,
@@ -171,6 +171,7 @@ class EnsembleSOPRetriever:
         dense_weight: float | None = None,
         bm25_k1: float | None = None,
         bm25_b: float | None = None,
+        fuse_func: str = "rrf",
     ) -> None:
         if mode not in MODES:
             raise ValueError(f"Unknown mode '{mode}'. Choose one of {MODES}.")
@@ -213,7 +214,11 @@ class EnsembleSOPRetriever:
         if not 0.0 <= self.bm25_b <= 1.0:
             raise ValueError("bm25_b must be in [0, 1].")
 
-        self.retriever: EnsembleRetriever | None = None
+        self.fuse_func = fuse_func
+        self.rrf_c = ENSEMBLE_CONFIG["rrf_c"]
+
+        self.bm25_retriever: BM25Retriever | None = None
+        self.dense_retriever: Any = None
         self._initialize()
 
     def _build_search_kwargs(self) -> Dict[str, Any]:
@@ -312,24 +317,84 @@ class EnsembleSOPRetriever:
         )
         bm25_retriever.k = self.fetch_k
 
-        self.retriever = EnsembleRetriever(
-            retrievers=[bm25_retriever, dense_retriever],
-            weights=[self.bm25_weight, self.dense_weight],
-            c=ENSEMBLE_CONFIG["rrf_c"],
-            id_key=ID_KEY,
-        )
+        self.bm25_retriever = bm25_retriever
+        self.dense_retriever = dense_retriever
 
         print(
-            f"EnsembleRetriever ready (mode={self.mode}) — "
+            f"Manual ensemble retriever ready (mode={self.mode}) — "
             f"dense={dense_count} ({self._paths['retriever_kind']}, "
             f"{self._paths['embedding_model']}), "
             f"sparse={len(bm25_docs)} BM25 docs (k1={self.bm25_k1}, b={self.bm25_b}), "
             f"weights=[bm25={self.bm25_weight}, dense={self.dense_weight}], "
+            f"fuse_func={self.fuse_func}, "
             f"fetch_k={self.fetch_k}, max_results={self.max_results}"
         )
 
+    @staticmethod
+    def _doc_key(doc: Document) -> str:
+        """Stable identity for fusion dedup; prefer ID_KEY, fall back to content."""
+        meta = doc.metadata or {}
+        key = meta.get(ID_KEY)
+        if key is not None:
+            return str(key)
+        return f"__content__::{hash(doc.page_content)}"
+
+    def fuse(
+        self,
+        ranked_lists: List[List[Document]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Fuse multiple ranked lists into one ordered list.
+
+        `ranked_lists[i]` is the per-retriever result (already ordered best→worst)
+        and `weights[i]` is its corresponding weight.
+        """
+        if len(ranked_lists) != len(weights):
+            raise ValueError("ranked_lists and weights must have the same length.")
+
+        if self.fuse_func == "rrf":
+            return self._weighted_rrf(ranked_lists, weights)
+        elif self.fuse_func == "linear":
+            # Placeholder: weighted linear combination of normalized scores.
+            raise NotImplementedError("fuse_func='linear' not implemented yet.")
+        elif self.fuse_func == "comb_sum":
+            # Placeholder: CombSUM over normalized retriever scores.
+            raise NotImplementedError("fuse_func='comb_sum' not implemented yet.")
+        else:
+            raise ValueError(f"Unknown fuse_func '{self.fuse_func}'.")
+
+    def _weighted_rrf(
+        self,
+        ranked_lists: List[List[Document]],
+        weights: List[float],
+    ) -> List[Document]:
+        """Weighted Reciprocal Rank Fusion.
+
+        score(d) = sum_i  w_i / (c + rank_i(d))   (rank starts at 1)
+        """
+        c = self.rrf_c
+        scores: Dict[str, float] = {}
+        first_seen: Dict[str, Document] = {}
+
+        for docs, w in zip(ranked_lists, weights):
+            for rank, doc in enumerate(docs, start=1):
+                key = self._doc_key(doc)
+                scores[key] = scores.get(key, 0.0) + w / (c + rank)
+                if key not in first_seen:
+                    first_seen[key] = doc
+
+        ordered_keys = sorted(scores, key=scores.get, reverse=True)
+        return [first_seen[k] for k in ordered_keys]
+
     def query(self, query: str) -> List[Document]:
-        if self.retriever is None:
+        if self.bm25_retriever is None or self.dense_retriever is None:
             raise RuntimeError("Retriever not initialized.")
-        results = self.retriever.invoke(query)
-        return results[: self.max_results]
+
+        bm25_results = self.bm25_retriever.invoke(query)[: self.fetch_k]
+        dense_results = self.dense_retriever.invoke(query)[: self.fetch_k]
+
+        fused = self.fuse(
+            [bm25_results, dense_results],
+            [self.bm25_weight, self.dense_weight],
+        )
+        return fused[: self.max_results]

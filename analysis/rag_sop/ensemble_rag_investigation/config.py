@@ -122,7 +122,7 @@ RETRIEVAL_CONFIG = {
     "search_type": "similarity",
     "default_score_threshold": 0.3,
     # Initial candidates pulled from each arm (BM25 and dense) before RRF fusion.
-    "fetch_k": 12,
+    "fetch_k": 20,
     # Final number of fused results returned to the caller.
     "max_results": 5,
 }
