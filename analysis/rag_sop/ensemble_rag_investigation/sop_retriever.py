@@ -173,6 +173,8 @@ class _IdInjectingDocstore(BaseStore[str, Document]):
 class EnsembleSOPRetriever:
     """BM25 (sparse) + Chroma (dense) ensemble, dense engine selectable by mode."""
 
+    CROSS_ENCODER_MODELS: set = {"BAAI/bge-reranker-base"}
+
     def __init__(
         self,
         mode: str = "parent_child",
@@ -234,6 +236,7 @@ class EnsembleSOPRetriever:
         self.dense_retriever: Any = None
         self.dense_vectorstore: Chroma | None = None
         self.dense_docstore: BaseStore[str, Document] | None = None
+        self._cross_encoder: Any = None
         self._initialize()
 
     def _build_search_kwargs(self) -> Dict[str, Any]:
@@ -361,13 +364,27 @@ class EnsembleSOPRetriever:
         ranked_lists: List[List[Document]] | None = None,
         weights: List[float] | None = None,
         scored_lists: List[List[Tuple[Document, float]]] | None = None,
+        query: str | None = None,
     ) -> List[Document]:
         """Fuse multiple per-retriever result lists into one ordered list.
 
         Rank-based fusers (rrf/borda/log_rank/condorcet) consume `ranked_lists`.
-        Score-based fusers (combsum) consume `scored_lists` (each entry a
-        list of (Document, raw_score) tuples, higher = better).
+        Score-based fusers (combsum/isrc/log_odds) consume `scored_lists`
+        (each entry a list of (Document, raw_score) tuples, higher = better).
+        Cross-encoder reranker fusers consume `ranked_lists` + `query`; their
+        union is rescored by the cross-encoder, weights are ignored.
         """
+        if self.fuse_func in self.CROSS_ENCODER_MODELS:
+            if ranked_lists is None:
+                raise ValueError(
+                    f"fuse_func='{self.fuse_func}' requires ranked_lists."
+                )
+            if not query:
+                raise ValueError(
+                    f"fuse_func='{self.fuse_func}' requires the original query."
+                )
+            return self._cross_encoder_rerank(ranked_lists, query)
+
         if weights is None:
             raise ValueError("weights is required.")
 
@@ -617,6 +634,47 @@ class EnsembleSOPRetriever:
         ordered_keys = sorted(scores, key=scores.get, reverse=True)
         return [first_seen[k] for k in ordered_keys]
 
+    def _get_cross_encoder(self):
+        """Lazy-load the configured CrossEncoder reranker."""
+        if self._cross_encoder is None:
+            from sentence_transformers import CrossEncoder
+
+            self._cross_encoder = CrossEncoder(self.fuse_func)
+        return self._cross_encoder
+
+    def _cross_encoder_rerank(
+        self,
+        ranked_lists: List[List[Document]],
+        query: str,
+    ) -> List[Document]:
+        """Rerank the union of all retrieved docs with a cross-encoder.
+
+        Weights and per-arm ranks are ignored: the cross-encoder produces
+        a single relevance score per (query, doc) pair, and the union
+        is reordered by that score (higher = better).
+        """
+        unique_docs: Dict[str, Document] = {}
+        for docs in ranked_lists:
+            for doc in docs:
+                key = self._doc_key(doc)
+                if key not in unique_docs:
+                    unique_docs[key] = doc
+
+        if not unique_docs:
+            return []
+
+        unique_keys = list(unique_docs.keys())
+        pairs = [(query, unique_docs[k].page_content) for k in unique_keys]
+
+        reranker = self._get_cross_encoder()
+        ce_scores = reranker.predict(pairs)
+        ce_by_id: Dict[str, float] = {
+            key: float(score) for key, score in zip(unique_keys, ce_scores)
+        }
+
+        ordered_keys = sorted(unique_keys, key=lambda k: ce_by_id[k], reverse=True)
+        return [unique_docs[k] for k in ordered_keys]
+
     def _bm25_with_scores(self, query: str) -> List[Tuple[Document, float]]:
         """Top fetch_k (Document, BM25 score) pairs.
 
@@ -685,6 +743,14 @@ class EnsembleSOPRetriever:
             fused = self.fuse(
                 weights=[self.bm25_weight, self.dense_weight],
                 scored_lists=[bm25_scored, dense_scored],
+            )
+        elif self.fuse_func in self.CROSS_ENCODER_MODELS:
+            bm25_results = self.bm25_retriever.invoke(query)[: self.fetch_k]
+            dense_results = self.dense_retriever.invoke(query)[: self.fetch_k]
+            fused = self.fuse(
+                ranked_lists=[bm25_results, dense_results],
+                weights=[self.bm25_weight, self.dense_weight],
+                query=query,
             )
         else:
             bm25_results = self.bm25_retriever.invoke(query)[: self.fetch_k]
