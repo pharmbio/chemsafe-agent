@@ -1,75 +1,117 @@
+"""Config for the SOP RAG ensemble (BM25 + dense), production paths.
+
+Two ensemble modes share the same sparse (BM25) + dense (Chroma) topology;
+the dense engine is swappable:
+
+  mode="basic"          → MultiVectorRetriever + text-embedding-3-small
+  mode="parent_child"   → ParentDocumentRetriever + text-embedding-3-large
+                          (child chunk_size=400, overlap=50)
+
+At runtime the retriever reads from MEMORY_ROOT/sop_documents/<mode>/. Source
+databases live under analysis/rag_sop/ and are copied in by sop_indexer.py
+when (re)building the index.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-from app.config import DATA_ROOT, MEMORY_ROOT, REPO_ROOT
+from app.config import MEMORY_ROOT, OPENAI_API_KEY, REPO_ROOT
 
-# Base paths
-DATA_DIR = DATA_ROOT
+ID_KEY = "doc_id"
+
+# Production data lives under MEMORY_ROOT (typically <repo>/persistence/memory).
 MEMORY_DIR = MEMORY_ROOT
-MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-
-# SOP specific paths
-_preferred_sop_dir = DATA_DIR / "SOPs"
-_legacy_sop_dir = DATA_DIR / "SOP"
-if _preferred_sop_dir.exists():
-    SOP_DATA_DIR = _preferred_sop_dir
-elif _legacy_sop_dir.exists():
-    SOP_DATA_DIR = _legacy_sop_dir
-else:
-    SOP_DATA_DIR = _preferred_sop_dir
-
 SOP_MEMORY_DIR = MEMORY_DIR / "sop_documents"
-CHROMA_PERSIST_PATH = SOP_MEMORY_DIR / "chroma_db" / "sop_rag"
-DOCSTORE_PATH = SOP_MEMORY_DIR / "docstore.pkl"
 
-# ChromaDB configuration
-COLLECTION_NAME = 'sop_rag'
-ID_KEY = 'doc_id'
+# Original PDFs (used only for indexing pipelines upstream).
+SOP_DATA_DIR = REPO_ROOT / "analysis" / "rag_sop" / "SOPs"
 
-# PDF processing configuration
-PDF_PROCESSING_CONFIG = {
-    'strategy': 'hi_res',
-    'infer_table_structure': True,
-    'extract_image_block_types': ['Image'],
-    'extract_image_block_to_payload': True,
-    'chunking_strategy': 'by_title',
-    'max_characters': 10000,
-    'combine_text_under_n_chars': 2000,
-    'new_after_n_chars': 6000,
+# --- Source locations (read-only, used by the copy step in sop_indexer) ---
+
+_ANALYSIS_ROOT = REPO_ROOT / "analysis" / "rag_sop"
+
+# basic_rag sources
+BASIC_SOURCE_CHROMA_DIR = _ANALYSIS_ROOT / "basic_rag" / "sop_documents" / "chroma_db"
+BASIC_SOURCE_DOCSTORE_DIR = _ANALYSIS_ROOT / "basic_rag" / "sop_documents" / "docstore"
+
+# parent_child winner: text-embedding-3-large / c400_o50.
+PC_EMBEDDING_MODEL = "text-embedding-3-large"
+PC_CHUNK_SIZE = 400
+PC_CHUNK_OVERLAP = 50
+PC_CHILD_COLLECTION = (
+    f"sop_rag_{PC_EMBEDDING_MODEL}_c{PC_CHUNK_SIZE}_o{PC_CHUNK_OVERLAP}"
+)
+PC_SOURCE_CHROMA_DIR = (
+    _ANALYSIS_ROOT
+    / "parent_child_rag_investigation"
+    / "sop_documents"
+    / "chroma_db"
+    / PC_EMBEDDING_MODEL
+    / f"c{PC_CHUNK_SIZE}_o{PC_CHUNK_OVERLAP}"
+)
+PC_SOURCE_DOCSTORE_DIR = (
+    _ANALYSIS_ROOT / "parent_child_rag_investigation" / "sop_documents" / "docstore"
+)
+
+# --- Local destinations (what the retriever actually reads) --------------
+
+MODES = ("basic", "parent_child")
+
+MODE_PATHS = {
+    "basic": {
+        "root": SOP_MEMORY_DIR / "basic",
+        "chroma_dir": SOP_MEMORY_DIR / "basic" / "chroma_db",
+        "docstore_dir": SOP_MEMORY_DIR / "basic" / "docstore",
+        "bm25_corpus": SOP_MEMORY_DIR / "basic" / "bm25_corpus.pkl",
+        "collection_name": "sop_rag",
+        "embedding_model": "text-embedding-3-small",
+        # MultiVectorRetriever; docstore is a bare LocalFileStore whose values
+        # are JSON-encoded Documents.
+        "retriever_kind": "multivector",
+    },
+    "parent_child": {
+        "root": SOP_MEMORY_DIR / "parent_child",
+        "chroma_dir": SOP_MEMORY_DIR / "parent_child" / "chroma_db",
+        "docstore_dir": SOP_MEMORY_DIR / "parent_child" / "docstore",
+        "bm25_corpus": SOP_MEMORY_DIR / "parent_child" / "bm25_corpus.pkl",
+        "collection_name": PC_CHILD_COLLECTION,
+        "embedding_model": PC_EMBEDDING_MODEL,
+        "chunk_size": PC_CHUNK_SIZE,
+        "chunk_overlap": PC_CHUNK_OVERLAP,
+        # ParentDocumentRetriever; docstore wrapped via create_kv_docstore()
+        # so values are LangChain-serialized Documents.
+        "retriever_kind": "parent_document",
+    },
 }
 
-# LLM configuration
-LLM_CONFIG = {
-    'summarization_model': 'gpt-5.1',
-    'image_description_model': 'gpt-5.1',
-    'rag_response_model': 'gpt-5.1'
+# EnsembleRetriever weights (sparse BM25 + dense Chroma) and BM25 hyperparams.
+# rank_bm25 defaults: k1=1.5, b=0.75.
+ENSEMBLE_CONFIG = {
+    "bm25_weight": 0.5,
+    "dense_weight": 0.5,
+    "bm25_k1": 1.5,
+    "bm25_b": 0.75,
+    "rrf_c": 60,
 }
 
-# Retrieval configuration
 RETRIEVAL_CONFIG = {
-    'search_type': 'similarity_score_threshold',
-    'default_score_threshold': 0.3,
-    'max_results': 12,
+    "search_type": "similarity",
+    "default_score_threshold": 0.3,
+    # Initial candidates pulled from each arm (BM25 and dense) before fusion.
+    "fetch_k": 20,
+    # Final number of fused results returned to the caller.
+    "max_results": 5,
 }
 
-def ensure_directories():
-    """Ensure all necessary directories exist."""
-    directories = [
-        SOP_DATA_DIR,
-        SOP_MEMORY_DIR,
-        CHROMA_PERSIST_PATH,
-    ]
-    
-    for directory in directories:
-        directory.mkdir(parents=True, exist_ok=True)
+LLM_CONFIG = {
+    "rag_response_model": "gpt-5.1",
+}
 
-if __name__ == "__main__":
-    # Test configuration
-    print("SOP RAG Configuration:")
-    print(f"Repository root: {REPO_ROOT}")
-    print(f"SOP data directory: {SOP_DATA_DIR}")
-    print(f"ChromaDB path: {CHROMA_PERSIST_PATH}")
-    print(f"Collection name: {COLLECTION_NAME}")
-    
-    # Ensure directories exist
-    ensure_directories()
-    print("\nDirectories created successfully!")
+
+def ensure_mode_directories(mode: str) -> None:
+    if mode not in MODES:
+        raise ValueError(f"Unknown mode '{mode}'. Choose one of {MODES}.")
+    paths = MODE_PATHS[mode]
+    for d in (SOP_MEMORY_DIR, paths["root"], paths["chroma_dir"], paths["docstore_dir"]):
+        Path(d).mkdir(parents=True, exist_ok=True)

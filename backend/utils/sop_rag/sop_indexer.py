@@ -1,312 +1,180 @@
-import os
+"""Copy source RAG databases into MEMORY_ROOT and (re)build BM25 corpora.
+
+This indexer does not parse PDFs or call embeddings of its own. It copies the
+artifacts produced by sibling RAG pipelines under analysis/rag_sop/ and
+packages them with a per-mode BM25 corpus, under MEMORY_ROOT/sop_documents/.
+
+Modes
+-----
+basic         dense engine = basic_rag (MultiVectorRetriever, embedding=small).
+parent_child  dense engine = parent_child_rag winner (large, c400_o50).
+
+BM25 corpus
+-----------
+For each mode the corpus is the *parent* documents the dense retriever
+ultimately returns; both arms therefore carry the same doc_id metadata,
+which is required for EnsembleRetriever's id_key dedup to work.
+"""
+
+from __future__ import annotations
+
 import argparse
-import uuid
+import json
+import pickle
+import shutil
 from pathlib import Path
-from tempfile import gettempdir
-from typing import List, Dict, Any
+from typing import List, Tuple
 
-# Keep transient caches in a writable temp location when run directly.
-TMP_ROOT = Path(gettempdir()) / "safechem-agent"
-TMP_ROOT.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("NUMBA_CACHE_DIR", str(TMP_ROOT / "numba-cache"))
-os.environ.setdefault("MPLCONFIGDIR", str(TMP_ROOT / "matplotlib"))
-os.environ.setdefault("XDG_CACHE_HOME", str(TMP_ROOT / "xdg-cache"))
-
-from unstructured.partition.pdf import partition_pdf
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableLambda
+from langchain_classic.storage import LocalFileStore, create_kv_docstore
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
-from langchain_classic.retrievers.multi_vector import MultiVectorRetriever
-from langchain_classic.storage import LocalFileStore
-
-import sys
-
-# Add repo root to sys.path so the module works both directly and via root-level wrapper.
-CURRENT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = CURRENT_DIR.parents[2]
-repo_root_str = str(REPO_ROOT)
-if repo_root_str not in sys.path:
-    sys.path.insert(0, repo_root_str)
 
 from backend.utils.sop_rag.config import (
-    SOP_DATA_DIR,
-    CHROMA_PERSIST_PATH,
-    COLLECTION_NAME,
+    BASIC_SOURCE_CHROMA_DIR,
+    BASIC_SOURCE_DOCSTORE_DIR,
     ID_KEY,
-    DOCSTORE_PATH,
-    PDF_PROCESSING_CONFIG,
-    LLM_CONFIG,
-    ensure_directories,
+    MODE_PATHS,
+    MODES,
+    PC_SOURCE_CHROMA_DIR,
+    PC_SOURCE_DOCSTORE_DIR,
+    ensure_mode_directories,
 )
-from app.config import OPENAI_API_KEY
 
-def _require_openai_api_key() -> str:
-    """Return the configured OpenAI API key or raise if missing."""
-    openai_api_key = OPENAI_API_KEY
-    if not openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured; cannot index SOP documents.")
-    return openai_api_key
 
-def discover_pdf_files(directory: str) -> List[str]:
-    """Discover all PDF files in the specified directory."""
-    pdf_files = []
-    directory_path = Path(directory)
-    
-    if not directory_path.exists():
-        raise FileNotFoundError(f"Directory {directory} does not exist")
-    
-    for file_path in directory_path.glob("*.pdf"):
-        if file_path.is_file():
-            pdf_files.append(str(file_path))
-    
-    return sorted(pdf_files)
+def _source_dirs_for(mode: str) -> Tuple[Path, Path]:
+    if mode == "basic":
+        return BASIC_SOURCE_CHROMA_DIR, BASIC_SOURCE_DOCSTORE_DIR
+    if mode == "parent_child":
+        return PC_SOURCE_CHROMA_DIR, PC_SOURCE_DOCSTORE_DIR
+    raise ValueError(f"Unknown mode '{mode}'")
 
-def extract_pdf_content(file_path: str) -> List[Any]:
-    """Extract and chunk PDF content including text, tables, and images."""
-    return partition_pdf(
-        filename=file_path,
-        **PDF_PROCESSING_CONFIG
-    )
 
-def separate_content_types(chunks: List[Any]) -> Dict[str, List[Any]]:
-    """Separate chunks into tables, texts, and images."""
-    tables = []
-    texts = []
-    
-    for chunk in chunks:
-        if "Table" in str(type(chunk)):
-            tables.append(chunk)
-        elif "CompositeElement" in str(type(chunk)):
-            texts.append(chunk)
-    
-    return {"tables": tables, "texts": texts}
+def _copytree(src: Path, dst: Path, overwrite: bool) -> None:
+    if not src.exists():
+        raise FileNotFoundError(f"Source not found: {src}")
+    if dst.exists():
+        if not overwrite:
+            print(f"  - {dst} already exists; pass --overwrite to replace.")
+            return
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    print(f"  - copied {src} → {dst}")
 
-def extract_images_base64(chunks: List[Any]) -> List[str]:
-    """Extract base64-encoded images from CompositeElement chunks."""
-    images_b64 = []
-    for chunk in chunks:
-        if "CompositeElement" in str(type(chunk)):
-            chunk_els = chunk.metadata.orig_elements
-            for el in chunk_els:
-                if 'Image' in str(type(el)):
-                    images_b64.append(el.metadata.image_base64)
-    return images_b64
 
-def create_text_table_summarizer() -> RunnableLambda:
-    """Create a chain for summarizing text and table content."""
-    prompt_text_tables = """
-You are an assistant tasked with summarizing tables and text.
-Give a concise summary of the table or text.
+def copy_source_databases(mode: str, overwrite: bool = False) -> None:
+    """Copy the source Chroma + docstore for `mode` into MEMORY_ROOT."""
+    ensure_mode_directories(mode)
+    paths = MODE_PATHS[mode]
+    src_chroma, src_docstore = _source_dirs_for(mode)
 
-Respond only with the summary, no additional comment.
-Do not start your message by saying "Here is a summary" or anything like that.
-Just give the summary as it is.
+    print(f"\n[copy] mode={mode}")
+    _copytree(src_chroma, Path(paths["chroma_dir"]), overwrite=overwrite)
+    _copytree(src_docstore, Path(paths["docstore_dir"]), overwrite=overwrite)
 
-Table or text chunk: 
 
-"{element}"
-"""
-    template = ChatPromptTemplate.from_template(prompt_text_tables)
-    api_key = _require_openai_api_key()
-    llm = ChatOpenAI(model=LLM_CONFIG["summarization_model"], api_key=api_key)
-    return template | llm | StrOutputParser()
-
-def create_image_summarizer() -> RunnableLambda:
-    """Create a chain for summarizing image content."""
-    prompt_images = """Describe the image in detail. For context,
-the image is part of a research paper explaining the transformers
-architecture. Be specific about graphs, such as bar plots."""
-    
-    messages = [
-        (
-            "user",
-            [
-                {"type": "text", "text": prompt_images},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": "data:image/jpeg;base64,{image}"},
-                },
-            ],
-        )
-    ]
-    prompt = ChatPromptTemplate.from_messages(messages)
-    api_key = _require_openai_api_key()
-    return prompt | ChatOpenAI(model=LLM_CONFIG["image_description_model"], api_key=api_key) | StrOutputParser()
-
-def create_multi_vector_retriever():
-    """Create MultiVectorRetriever with persistent ChromaDB and LocalFileStore."""
-    # Ensure directory exists
-    ensure_directories()
-    api_key = _require_openai_api_key()
-
-    # Create vector store for summaries (search)
-    vectorstore = Chroma(
-        collection_name=COLLECTION_NAME,
-        embedding_function=OpenAIEmbeddings(model = "text-embedding-3-small", api_key=api_key),
-        persist_directory=str(CHROMA_PERSIST_PATH),
-    )
-    
-    # Create docstore for original content (retrieval)
-    docstore = LocalFileStore(str(DOCSTORE_PATH.parent / "docstore"))
-    
-    # Create MultiVectorRetriever
-    retriever = MultiVectorRetriever(
-        vectorstore=vectorstore,
-        docstore=docstore,
-        id_key=ID_KEY
-    )
-    
-    return retriever
-
-def add_content_to_retriever(retriever: MultiVectorRetriever, content: List[Any], summaries: List[str]) -> None:
-    """Add content and summaries to the MultiVectorRetriever."""
-    doc_ids = [str(uuid.uuid4()) for _ in content]
-    summary_docs = []
-    original_docs = []
-    
-    for i, summary in enumerate(summaries):
-        # Create summary document for vector store (used for search)
-        summary_metadata = {
-            ID_KEY: doc_ids[i],
-            'content_type': str(type(content[i]).__name__)
-        }
-        
-        # Preserve filename if available
-        if hasattr(content[i], 'metadata') and hasattr(content[i].metadata, 'filename'):
-            summary_metadata['filename'] = content[i].metadata.filename
-            
-        summary_docs.append(Document(page_content=summary, metadata=summary_metadata))
-        
-        # Create original document for docstore (retrieved content)
-        original_text = ""
-        if hasattr(content[i], 'text'):
-            original_text = content[i].text
-        elif hasattr(content[i], 'metadata') and hasattr(content[i].metadata, 'text_as_html'):
-            original_text = content[i].metadata.text_as_html
-        elif isinstance(content[i], str):  # For images
-            original_text = f"[Base64 Image Data: {len(content[i])} characters]"
-            
-        original_docs.append(Document(page_content=original_text, metadata=summary_metadata))
-    
-    # Add documents to the retriever
-    retriever.vectorstore.add_documents(summary_docs)
-    # Store original documents with metadata as JSON in docstore
-    import json
-    doc_data = []
-    for doc in original_docs:
-        doc_dict = {
-            'page_content': doc.page_content,
-            'metadata': doc.metadata
-        }
-        doc_data.append(json.dumps(doc_dict).encode('utf-8'))
-    
-    retriever.docstore.mset(list(zip(doc_ids, doc_data)))
-
-def clear_existing_collection():
-    """Clear existing collection and docstore to rebuild from scratch."""
-    api_key = _require_openai_api_key()
-    try:
-        vectorstore = Chroma(
-            collection_name=COLLECTION_NAME,
-            embedding_function=OpenAIEmbeddings(model = "text-embedding-3-small", api_key=api_key),
-            persist_directory=str(CHROMA_PERSIST_PATH),
-        )
-        vectorstore.delete_collection()
-        print("Cleared existing collection")
-    except Exception as e:
-        print(f"No existing collection to clear: {e}")
-    
-    # Clear docstore
-    try:
-        docstore_dir = DOCSTORE_PATH.parent / "docstore"
-        if docstore_dir.exists():
-            import shutil
-            shutil.rmtree(docstore_dir)
-            print("Cleared existing docstore")
-    except Exception as e:
-        print(f"No existing docstore to clear: {e}")
-
-def process_and_index_pdfs(directory: str) -> None:
-    """Process all PDF files and store in persistent vector database."""    
-    # Clear existing collection
-    clear_existing_collection()
-    
-    # Discover PDF files
-    pdf_files = discover_pdf_files(directory)
-    print(f"Found {len(pdf_files)} PDF files to process:")
-    for file in pdf_files:
-        print(f"  - {os.path.basename(file)}")
-    
-    if not pdf_files:
-        print("No PDF files found to process")
-        return
-    
-    # Create MultiVectorRetriever
-    retriever = create_multi_vector_retriever()
-    
-    # Create summarizers
-    text_table_summarizer = create_text_table_summarizer()
-    image_summarizer = create_image_summarizer()
-    
-    total_texts = 0
-    total_tables = 0
-    total_images = 0
-    
-    # Process each PDF file
-    for pdf_file in pdf_files:
-        print(f"\nProcessing {os.path.basename(pdf_file)}...")
-        
-        try:
-            # Extract content from current PDF
-            chunks = extract_pdf_content(pdf_file)
-            content_types = separate_content_types(chunks)
-            texts = content_types["texts"]
-            tables = content_types["tables"]
-            images = extract_images_base64(chunks)
-            
-            # Process texts
-            if texts:
-                print(f"  - Processing {len(texts)} text chunks...")
-                text_summaries = text_table_summarizer.batch(texts)
-                add_content_to_retriever(retriever, texts, text_summaries)
-                total_texts += len(texts)
-            
-            # Process tables
-            if tables:
-                print(f"  - Processing {len(tables)} tables...")
-                tables_html = [table.metadata.text_as_html for table in tables]
-                table_summaries = text_table_summarizer.batch(tables_html)
-                add_content_to_retriever(retriever, tables, table_summaries)
-                total_tables += len(tables)
-            
-            # Process images
-            if images:
-                print(f"  - Processing {len(images)} images...")
-                image_summaries = image_summarizer.batch(images)
-                add_content_to_retriever(retriever, images, image_summaries)
-                total_images += len(images)
-                
-        except Exception as e:
-            print(f"  - Error processing {pdf_file}: {e}")
+def _load_basic_parents(docstore_dir: Path) -> List[Document]:
+    """basic_rag stores Documents as raw JSON files under LocalFileStore."""
+    store = LocalFileStore(str(docstore_dir))
+    keys = list(store.yield_keys())
+    raw_values = store.mget(keys)
+    docs: List[Document] = []
+    for key, value in zip(keys, raw_values):
+        if value is None:
             continue
-    
-    print(f"\n=== Indexing Complete ===")
-    print(f"Total indexed: {total_texts} text chunks, {total_tables} tables, {total_images} images")
-    print(f"Vector store saved to: {CHROMA_PERSIST_PATH}")
+        try:
+            payload = json.loads(value.decode("utf-8"))
+            content = payload.get("page_content", "")
+            metadata = dict(payload.get("metadata", {}))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            content = value.decode("utf-8", errors="replace")
+            metadata = {}
+        metadata.setdefault(ID_KEY, key)
+        docs.append(Document(page_content=content, metadata=metadata))
+    return docs
 
-def main():
-    """Main execution function."""
-    parser = argparse.ArgumentParser(description="Index SOP PDFs into the local RAG store.")
+
+def _load_parent_child_parents(docstore_dir: Path) -> List[Document]:
+    """parent_child docstore is wrapped with create_kv_docstore()."""
+    file_store = LocalFileStore(str(docstore_dir))
+    docstore = create_kv_docstore(file_store)
+    keys = list(file_store.yield_keys())
+    values = docstore.mget(keys)
+    docs: List[Document] = []
+    for key, doc in zip(keys, values):
+        if doc is None:
+            continue
+        metadata = dict(doc.metadata or {})
+        metadata.setdefault(ID_KEY, key)
+        docs.append(Document(page_content=doc.page_content, metadata=metadata))
+    return docs
+
+
+def _load_parents_for_mode(mode: str) -> List[Document]:
+    docstore_dir = Path(MODE_PATHS[mode]["docstore_dir"])
+    if not docstore_dir.exists():
+        raise FileNotFoundError(
+            f"Docstore not yet copied for mode '{mode}' at {docstore_dir}. "
+            f"Run with --copy first."
+        )
+    if mode == "basic":
+        return _load_basic_parents(docstore_dir)
+    if mode == "parent_child":
+        return _load_parent_child_parents(docstore_dir)
+    raise ValueError(f"Unknown mode '{mode}'")
+
+
+def build_bm25_corpus(mode: str) -> None:
+    """Pickle parent (page_content, metadata) tuples for BM25 to rebuild from."""
+    parents = _load_parents_for_mode(mode)
+    if not parents:
+        raise RuntimeError(f"No parent documents found for mode '{mode}'.")
+
+    payload = [
+        {"page_content": d.page_content, "metadata": d.metadata} for d in parents
+    ]
+    out_path = Path(MODE_PATHS[mode]["bm25_corpus"])
+    with open(out_path, "wb") as f:
+        pickle.dump(payload, f)
+    print(f"  - wrote BM25 corpus ({len(payload)} parents) → {out_path}")
+
+
+def setup_mode(mode: str, overwrite: bool = False) -> None:
+    copy_source_databases(mode, overwrite=overwrite)
+    print(f"[bm25] mode={mode}")
+    build_bm25_corpus(mode)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Copy source DBs into MEMORY_ROOT and (re)build per-mode BM25 corpora."
+    )
     parser.add_argument(
-        "--directory",
-        default=str(SOP_DATA_DIR),
-        help="Directory containing SOP PDF files.",
+        "--mode",
+        choices=list(MODES) + ["all"],
+        default="all",
+        help="Which ensemble mode(s) to set up.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace already-copied Chroma/docstore folders.",
+    )
+    parser.add_argument(
+        "--bm25-only",
+        action="store_true",
+        help="Skip the copy step and only rebuild the BM25 corpus from already-copied docstores.",
     )
     args = parser.parse_args()
-    process_and_index_pdfs(args.directory)
+
+    targets = MODES if args.mode == "all" else (args.mode,)
+    for m in targets:
+        if args.bm25_only:
+            print(f"\n[bm25-only] mode={m}")
+            build_bm25_corpus(m)
+        else:
+            setup_mode(m, overwrite=args.overwrite)
+
+    print("\n=== Done ===")
+
 
 if __name__ == "__main__":
     main()
