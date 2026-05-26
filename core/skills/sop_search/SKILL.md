@@ -79,7 +79,7 @@ for query in queries:
     results = sop_search(
         query=query,
         score_threshold=score_threshold,
-        max_results=12,
+        max_results=6,
     )
     # Deduplicate downstream by SOP/source identifier.
 ```
