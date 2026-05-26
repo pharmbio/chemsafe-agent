@@ -79,6 +79,7 @@ EXECUTE_MODEL = os.environ.get("EXECUTE_MODEL", "gpt-5.4")
 SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", "gpt-5.4")
 APPROVAL_JUDGE_MODEL = os.environ.get("APPROVAL_JUDGE_MODEL", "gpt-5.4-mini")
 CONTEXT_SUMMARY_MODEL = os.environ.get("CONTEXT_SUMMARY_MODEL", "gpt-5.4-mini")
+TASK_CLASSIFIER_MODEL = os.environ.get("TASK_CLASSIFIER_MODEL", "gpt-5.4-mini")
 
 RECURSION_LIMIT = _int_env("RECURSION_LIMIT", 100)
 SUMMARY_MAX_MESSAGES = _int_env("SUMMARY_MAX_MESSAGES", 200)

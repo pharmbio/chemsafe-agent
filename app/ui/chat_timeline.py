@@ -21,15 +21,34 @@ from app.ui.formatters import _derive_message_id
 
 
 AGENT_TITLES = {
+    "task_classifier": "Task Classifier",
     "planning_agent": "Planning Agent",
     "approval_ack": "Planning Agent",
     "execute_agent": "Execute Agent",
+    "execute_agent_free": "Execute Agent",
+    "execute_agent_plan": "Execute Agent",
     "summary_agent": "Summary Agent",
+    "summary_agent_simple": "Summary Agent",
+    "summary_agent_complex": "Summary Agent",
+    "summary_agent_meta": "Response",
     "summary": "Summary",
     "context_summary": "Context Summary",
+    "context_summary_simple": "Context Summary",
+    "context_summary_complex": "Context Summary",
+    "context_summary_meta": "Context Summary",
 }
 
-IGNORED_NODES = {"human_chat", "__start__", "__end__", "summary", "context_summary"}
+IGNORED_NODES = {
+    "task_classifier",
+    "human_chat",
+    "__start__",
+    "__end__",
+    "summary",
+    "context_summary",
+    "context_summary_simple",
+    "context_summary_complex",
+    "context_summary_meta",
+}
 TIMELINE_SNAPSHOT_VERSION = 1
 
 _MARKDOWN_IT_RENDERER = (
