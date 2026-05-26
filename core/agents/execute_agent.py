@@ -8,26 +8,29 @@ from core.tools.read_files import read_files
 def build_execute_agent(
     llm,
     pre_model_hook=None,
+    *,
+    name: str = "execute_agent",
+    prompt: str | None = None,
 ):
     """
-    Create core planning agent.
-    
-    Args:
-        llm: Language model instance
+    Create an execute agent.
 
-    Returns:
-        Enhanced or standard planning agent
+    Args:
+        llm: Language model instance.
+        pre_model_hook: Optional pre-model hook.
+        name: Node/agent name used by LangGraph.
+        prompt: System prompt. Defaults to the plan-following prompt.
     """
 
     tools = [
         python_executor,
         reset_python_state,
-        read_files
+        read_files,
     ]
     return create_react_agent(
         model=llm,
         tools=tools,
-        name="execute_agent",
-        prompt=EXECUTE_AGENT_SYSTEM_PROMPT,
+        name=name,
+        prompt=prompt if prompt is not None else EXECUTE_AGENT_SYSTEM_PROMPT,
         pre_model_hook=pre_model_hook,
     )

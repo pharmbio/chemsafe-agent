@@ -8,22 +8,25 @@ from core.tools.python_executor import python_executor
 def build_summary_agent(
     llm,
     pre_model_hook=None,
+    *,
+    name: str = "summary_agent",
+    prompt: str | None = None,
 ):
     """
-    Create core planning agent.
-    
-    Args:
-        llm: Language model instance
+    Create a summary agent.
 
-    Returns:
-        Enhanced or standard planning agent
+    Args:
+        llm: Language model instance.
+        pre_model_hook: Optional pre-model hook.
+        name: Node/agent name used by LangGraph.
+        prompt: System prompt. Defaults to the complex-task summary prompt.
     """
 
     tools = [read_files, python_executor]
     return create_react_agent(
         model=llm,
         tools=tools,
-        name="summary_agent",
-        prompt=SUMMARY_AGENT_SYSTEM_PROMPT,
+        name=name,
+        prompt=prompt if prompt is not None else SUMMARY_AGENT_SYSTEM_PROMPT,
         pre_model_hook=pre_model_hook,
     )
