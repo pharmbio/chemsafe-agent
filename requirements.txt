@@ -40,8 +40,5 @@ unstructured==0.22.20
 uvicorn==0.40.0
 chembl_webresource_client==0.10.9
 pubchempy==1.0.5
-# --- Strongly recommended (pre-trained ADMET/toxicity models) ----------------
 admet-ai>=1.0.0
-
-# --- Optional (Tox21 DeepChem GraphConv) -------------------------------------
 deepchem>=2.7.0
