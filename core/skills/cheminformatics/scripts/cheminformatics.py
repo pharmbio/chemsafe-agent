@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 from rdkit import Chem, DataStructs
-from rdkit.Chem import AllChem, Descriptors, Draw, rdMolDescriptors
+from rdkit.Chem import AllChem, Crippen, Descriptors, Draw, QED, rdMolDescriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.SaltRemover import SaltRemover
 from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
@@ -156,25 +156,31 @@ def murcko_scaffold_smiles(mol_or_smiles) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 _CORE_DESCRIPTORS = {
+    "molecular_formula": lambda m: rdMolDescriptors.CalcMolFormula(m),
     "mw": lambda m: Descriptors.MolWt(m),
+    "exact_mass": lambda m: Descriptors.ExactMolWt(m),
     "heavy_atoms": lambda m: m.GetNumHeavyAtoms(),
     "logp_crippen": lambda m: Descriptors.MolLogP(m),
+    "molar_refractivity": lambda m: Crippen.MolMR(m),
     "tpsa": lambda m: Descriptors.TPSA(m),
     "hbd": lambda m: rdMolDescriptors.CalcNumHBD(m),
     "hba": lambda m: rdMolDescriptors.CalcNumHBA(m),
     "rotatable_bonds": lambda m: rdMolDescriptors.CalcNumRotatableBonds(m),
     "aromatic_rings": lambda m: rdMolDescriptors.CalcNumAromaticRings(m),
     "rings": lambda m: rdMolDescriptors.CalcNumRings(m),
+    "num_stereocenters": lambda m: rdMolDescriptors.CalcNumAtomStereoCenters(m),
     "formal_charge": lambda m: Chem.GetFormalCharge(m),
     "fraction_csp3": lambda m: rdMolDescriptors.CalcFractionCSP3(m),
+    "qed_drug_likeness": lambda m: QED.qed(m),
 }
 
 
 def compute_descriptors(mol_or_smiles) -> dict:
     """Return a dict of common physchem/structural descriptors.
 
-    Keys: mw, heavy_atoms, logp_crippen, tpsa, hbd, hba, rotatable_bonds,
-    aromatic_rings, rings, formal_charge, fraction_csp3.
+    Keys: molecular_formula, mw, exact_mass, heavy_atoms, logp_crippen,
+    molar_refractivity, tpsa, hbd, hba, rotatable_bonds, aromatic_rings,
+    rings, num_stereocenters, formal_charge, fraction_csp3, qed_drug_likeness.
     """
     mol = mol_or_smiles if isinstance(mol_or_smiles, Chem.Mol) else parse_smiles(mol_or_smiles)
     if mol is None:
