@@ -38,7 +38,6 @@ DEFAULT_AUTHORIZED_IMPORTS = [
     'rdkit',
     'numpy',
     'matplotlib',
-    'rdkit',
     'seaborn',
     'scipy',
     'sklearn',
@@ -51,8 +50,9 @@ DEFAULT_AUTHORIZED_IMPORTS = [
     'openpyxl',
     'httpx',
     'pubchempy',
-    'chembl_webresource_client'
-    
+    'chembl_webresource_client',
+    'admet_ai',
+    'deepchem',
 ]
 authorized_imports = sorted(set(BASE_BUILTIN_MODULES) | set(DEFAULT_AUTHORIZED_IMPORTS))
 
