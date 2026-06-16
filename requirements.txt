@@ -13,6 +13,7 @@ langchain-openai==1.1.7
 langdetect==1.0.9
 langgraph==1.0.5
 langgraph-checkpoint==3.0.1
+rank_bm25==0.2.2
 langgraph-checkpoint-postgres==3.0.1
 langgraph-prebuilt==1.0.5
 matplotlib==3.10.8
@@ -41,4 +42,5 @@ uvicorn==0.40.0
 chembl_webresource_client==0.10.9
 pubchempy==1.0.5
 admet-ai>=1.0.0
-deepchem>=2.7.0
+deepchem
+tensorflow
