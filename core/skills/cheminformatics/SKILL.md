@@ -237,15 +237,17 @@ neighbors = nearest_neighbors(
 | Tanimoto (ECFP4, 2048 bits) | Interpretation for read-across                                          |
 |-----------------------------|--------------------------------------------------------------------------|
 | ≥ 0.85                      | Very close analogue; strong structural basis for read-across            |
-| 0.70 – 0.85                 | Close analogue; requires additional mechanistic / metabolic similarity  |
-| 0.50 – 0.70                 | Distant analogue; category approach only, needs cross-compound evidence |
-| < 0.50                      | Not a read-across candidate on structural grounds alone                 |
+| 0.75 – 0.85                 | Close analogue; requires additional mechanistic / metabolic similarity  |
+| 0.60 – 0.75                 | Moderate analogue; requires additional physicochemical, metabolic and biological evidence  |
+| 0.40 – 0.60                 | Distant analogue; category approach only, needs cross-compound evidence |
+| < 0.40                      | Not a read-across candidate on structural grounds alone                 |
 
 Rules:
 
 - **Tanimoto alone is not a RAAF justification.** The ECHA RAAF requires mechanistic and metabolic similarity in addition to structural similarity. Use this capability for the structural axis, then combine with mechanistic evidence (Line 7) and ADME evidence (Line 8) in `woe_reasoning`.
 - **Fingerprint type matters.** Morgan/ECFP is the default, but MACCS (166-bit) or AtomPair often rank differently. If the downstream QSAR used a different fingerprint, match it rather than forcing ECFP.
 - **Default radius=2** (≈ ECFP4). Use radius=3 (≈ ECFP6) for finer discrimination when neighbors cluster too tightly.
+- **Explicitly reports molecular similarity values ​​for cases where a "read across" analysis is necessary.**
 
 ---
 
@@ -351,12 +353,6 @@ drug = calc_drug_likeness(desc)
 Rules:
 
 - **Drug-likeness only — not a hazard criterion.** A failing Ro5 or Veber flag has no place in a hazard classification argument.
-- Use the Tier-A `lipinski_flags` helper if you only need the four Ro5 booleans without the Veber/Egan/Ghose composite.
-
-Rules:
-
-- **Drug-likeness only — not a hazard criterion.** A failing Ro5 or Veber flag has no place in a hazard classification argument.
-- **For a yes/no Lipinski pass question, derive the pass/fail from the four violation booleans returned by `lipinski_flags(desc)`.** “Passes Rule of 5 with zero violations” means all four fields (`mw_over_500`, `logp_over_5`, `hbd_over_5`, `hba_over_10`) are `False`.
 - Use the Tier-A `lipinski_flags` helper if you only need the four Ro5 booleans without the Veber/Egan/Ghose composite.
 
 ---
@@ -633,42 +629,6 @@ Rules:
 - **Don't silently fall back to another input** when a SMILES fails to parse. Record the failure and either fix the input or stop.
 - **Don't put `classify_ghs` output on an SDS, in a REACH dossier, or in any regulator-facing classification call.** It is a draft / screening output; the authoritative call lives in `woe_reasoning`.
 - **Don't treat a Tier-B prediction as ground truth.** Every `*_prob`, every QSAR-estimated EC50, every predicted Tm comes with model error and an AD constraint; record both with the value.
+- **Do not create hallucinations** about predicted or calculated values. Only data obtained through a predictive model, the use of codes, or bibliographic research are valid.
 
 ---
-
-
-<!-- SLOW_UPDATE:END -->
-
-
-## Derived-answer discipline for helper outputs
-
-When the prompt asks for a **derived yes/no or count** (for example, “passes with zero violations”, “how many are flagged”, “any alerts present”), do not assume the helper exposes that exact field. Instead:
-
-1. **Inspect the returned object and keys first.**
-2. **If the requested value is not present verbatim, derive it from the primitive fields in code and print the derived value explicitly.**
-3. **Do not treat a missing convenience key as `False`, `0`, or `None`.** Missing means “not provided by schema”, not a negative result.
-4. **Mirror the prompt’s semantics exactly**: “zero violations” means all violation flags are false; “how many present” means count present/true entries or use the helper’s supplied count field if it matches that meaning.
-
-Minimal pattern:
-
-```python
-result = helper(...)
-print(result)
-print(result.keys())
-# If the exact asked-for field is absent, derive it explicitly:
-answer = ...
-print({"derived_answer": answer})
-```
-
-<!-- SLOW_UPDATE:BEGIN (protected; step-level edits cannot modify) -->
-
-## Longitudinal guidance (slow update — protected)
-
-<!-- SLOW_UPDATE:BEGIN (protected; step-level edits cannot modify) -->
-
-- When a helper returns both a summary count field and a detailed structure, prefer the helper’s explicit summary field over recomputing from container shape. In particular, for `calc_explosivity`, use `num_explosive_groups`, not `len(explosive_groups_detected)`, because the latter is a fixed dictionary of categories.
-- If a convenience helper errors but the underlying library object works, salvage the task by interrogating the underlying result directly rather than guessing. For RDKit filter catalogs, inspect `catalog.GetMatches(mol)` / descriptions and make clear whether you are counting total hits or unique descriptions.
-- Be precise about counting semantics and mirror the prompt’s wording. “How many distinct alerts are detected?” may differ from raw hit count; de-duplicate only on a justified key, and do not assume duplicate descriptions across catalogs collapse unless the task says so.
-- For cheminformatics helpers, print or inspect the returned object before answering whenever the task asks for a single field/count. Many failures here came from inferring schema instead of reading it.
-
-<!-- SLOW_UPDATE:END -->
