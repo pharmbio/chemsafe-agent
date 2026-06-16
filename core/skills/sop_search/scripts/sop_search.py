@@ -27,14 +27,13 @@ def _format_sop_results(documents) -> str:
 
 def sop_search(
     query: str,
-    mode: str = "parent_child",
     score_threshold: float = 0,
     max_results: int = 5,
 ) -> str:
     """Search SOP documents via the BM25 + dense ensemble retriever."""
     try:
         retriever = EnsembleSOPRetriever(
-            mode=mode,
+            mode='parent_child',
             score_threshold=score_threshold,
             max_results=max_results,
             fetch_k=50,
