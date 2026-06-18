@@ -361,7 +361,7 @@ def applicability_domain_check(
 ) -> Optional[AppDomainReport]:
     """Structural-similarity applicability domain check.
 
-    Returns `inside_domain=True` iff the mean Tanimoto to the top-k nearest
+    Returns `inside_domain=True` if the mean Tanimoto to the top-k nearest
     training compounds is ≥ threshold. Threshold default 0.3 is conservative;
     calibrate per QSAR model using its published AD definition if available.
 
