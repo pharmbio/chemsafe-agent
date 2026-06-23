@@ -1,6 +1,6 @@
 ---
 name: cheminformatics
-description: Use this skill whenever the task requires structural manipulation, property calculation, or structure-based reasoning about a chemical — parsing or standardizing SMILES/InChI, computing physchem descriptors (MW, logP, TPSA, HBD/HBA, QED, exact mass), detecting structural alerts (PAINS / Brenk / NIH / custom toxicophore SMARTS), computing similarity or selecting analogues for read-across, extracting scaffolds or MCS, performing an applicability-domain check for a QSAR prediction, or producing predicted hazard endpoints (ADMET via admet-ai, Tox21 via DeepChem, baseline-narcosis ecotox, empirical melting-point QSAR, SMARTS explosivity, draft GHS rollup). Triggers before any cross-source chemical lookup (identifiers must be standardized first), before any read-across analogue selection, before any QSAR result is weighted in `woe_reasoning`, and whenever a physicochemical or predicted-hazard line of evidence must be produced from structure. The agent decides which capabilities to invoke and in what order — there is no fixed pipeline; only the documented preconditions on each capability must be respected.
+description: Use in all of your task. Always triggered and read this skill
 ---
 
 # Cheminformatics Skill (RDKit + QSAR toolbox)
