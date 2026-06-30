@@ -400,10 +400,7 @@ Use to predict activity for the 12 Tox21 endpoints: 7 nuclear receptors (NR-AR, 
 **Precondition:** canonical SMILES. First call downloads ~10 MB of data and trains the model (~5 min on CPU); subsequent calls restore from `~/.cache/chemical_safety_calc/tox21_graphconv/` in <10 s. The cache survives container restarts only if the cache dir is mounted as a volume.
 
 ```python
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_tox21, DEEPCHEM_OK
-
-if not DEEPCHEM_OK:
-    raise RuntimeError("deepchem not installed")
+from core.skills.cheminformatics.scripts.qsar_toolbox import calc_tox21
 
 tox21 = calc_tox21(std.canonical_smiles)
 # tox21["NR-AR"] == {"probability_active": 0.12, "prediction": "inactive"}

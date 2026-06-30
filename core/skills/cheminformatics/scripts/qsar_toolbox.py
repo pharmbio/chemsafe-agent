@@ -1,18 +1,8 @@
-"""QSAR / hazard-prediction toolbox (Tier B of the cheminformatics skill).
-
-This module composes the deterministic helpers in ``cheminformatics.py`` with
-external QSAR / ML model endpoints (admet-ai, DeepChem Tox21, baseline-narcosis
-ecotox, empirical melting-point QSAR, SMARTS-based explosivity) and a
-rule-based draft GHS rollup.
-
-Tier-B outputs are *predictions*, not deterministic structural facts. The
-draft GHS classification produced by :func:`classify_ghs` is screening output
-only — the authoritative classification call lives in ``woe_reasoning``.
-"""
-
 from __future__ import annotations
 
 import os
+import sys
+import types
 import warnings
 from pathlib import Path
 from typing import Optional
@@ -36,11 +26,28 @@ except ImportError:
     ADMET_AI_OK = False
 
 # --- DeepChem (optional) -----------------------------------------------------
+# DeepChem's feat package imports ``dgl`` unconditionally (in
+# ``deepvariant_featurizer``) but only guards ``ImportError``. With recent torch
+# (e.g. 2.11) the bundled DGL ships no matching ``graphbolt`` build and raises a
+# ``FileNotFoundError`` (an OSError, not ImportError) at import time, which
+# escapes that guard and breaks ``import deepchem`` entirely. The GraphConv /
+# Tox21 path below never touches DGL, so if real DGL is unavailable we shield the
+# import with a stub module. We try the real package first so environments that
+# do have a working DGL keep it.
 try:
+    import dgl  # noqa: F401
+except Exception:  # FileNotFoundError, ImportError, OSError, ...
+    sys.modules["dgl"] = types.ModuleType("dgl")
+
+try:
+    import torch
     import deepchem as dc
+    # The legacy Keras ``GraphConvModel`` passes ``fused=False`` to
+    # ``BatchNormalization``, which Keras 3 removed; use the torch backend model.
+    from deepchem.models.torch_models import GraphConvModel as _TorchGraphConvModel
     import numpy as np  # noqa: F401  (used transitively by DeepChem)
     DEEPCHEM_OK = True
-except ImportError:
+except Exception:
     DEEPCHEM_OK = False
 
 # Cache directory for the trained Tox21 model
@@ -53,6 +60,13 @@ TOX21_TASKS = [
     "NR-ER", "NR-ER-LBD", "NR-PPAR-gamma",
     "SR-ARE", "SR-ATAD5", "SR-HSE", "SR-MMP", "SR-p53",
 ]
+
+# GraphConv architecture (torch backend). ``number_input_features`` is required
+# by the torch ``GraphConvModel`` and must align with ``graph_conv_layers`` as
+# ``[number_atom_features, *graph_conv_layers[:-1]]``. With the default 75 atom
+# features and two 64-wide conv layers that is ``[75, 64]``.
+_GRAPH_CONV_LAYERS = [64, 64]
+_NUMBER_INPUT_FEATURES = [75, 64]
 
 
 # =============================================================================
@@ -182,6 +196,23 @@ def calc_admet(canonical_smiles: str) -> dict:
 _tox21_cache: Optional[tuple] = None  # (model, transformers)
 
 
+def _build_tox21_model(model_dir: str):
+    """Construct the torch-backend GraphConv model used for Tox21.
+
+    Pinned to CPU: DeepChem's torch GraphConv layers call ``.numpy()`` on
+    intermediate tensors, which fails on Apple-Silicon ``mps`` devices.
+    """
+    return _TorchGraphConvModel(
+        n_tasks=len(TOX21_TASKS),
+        number_input_features=_NUMBER_INPUT_FEATURES,
+        graph_conv_layers=_GRAPH_CONV_LAYERS,
+        mode="classification",
+        batch_size=128,
+        model_dir=model_dir,
+        device=torch.device("cpu"),
+    )
+
+
 def _load_or_train_tox21() -> tuple:
     global _tox21_cache
     if _tox21_cache is not None:
@@ -194,10 +225,7 @@ def _load_or_train_tox21() -> tuple:
             _, datasets, transformers = dc.molnet.load_tox21(
                 featurizer="GraphConv", splitter=None
             )
-            model = dc.models.GraphConvModel(
-                n_tasks=len(TOX21_TASKS), mode="classification",
-                batch_size=128, model_dir=model_dir,
-            )
+            model = _build_tox21_model(model_dir)
             model.restore()
             _tox21_cache = (model, transformers)
             return _tox21_cache
@@ -212,10 +240,7 @@ def _load_or_train_tox21() -> tuple:
     )
     train_ds, _val, _test = datasets
 
-    model = dc.models.GraphConvModel(
-        n_tasks=len(TOX21_TASKS), mode="classification",
-        batch_size=128, model_dir=model_dir,
-    )
+    model = _build_tox21_model(model_dir)
     model.fit(train_ds, nb_epoch=50)
     model.save_checkpoint()
     print("[Tox21] Model trained and cached. Future calls will be fast.")
