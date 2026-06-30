@@ -44,3 +44,4 @@ pubchempy==1.0.5
 admet-ai>=1.0.0
 deepchem
 tensorflow
+tf-keras
