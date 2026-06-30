@@ -1100,22 +1100,28 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
 
     visited.add(module_id)
 
-    # Create new module for actual modules
-    safe_module = ModuleType(raw_module.__name__)
+    # Create new module for actual modules. Some lazily-loaded modules (e.g.
+    # TensorFlow's LazyLoader when Keras 3 is present) raise on ``.__name__``,
+    # so fall back to a placeholder rather than letting that abort the import.
+    module_name = getattr(raw_module, "__name__", "module")
+    safe_module = ModuleType(module_name)
 
     # Copy all attributes by reference, recursively checking modules
     for attr_name in dir(raw_module):
         try:
             attr_value = getattr(raw_module, attr_name)
-        except (ImportError, AttributeError) as e:
+            # Recursively process nested modules, passing visited set. Kept
+            # inside the try so a submodule that errors while being copied
+            # (lazy loaders, optional deps) is skipped, not fatal to the whole
+            # import.
+            if isinstance(attr_value, ModuleType):
+                attr_value = get_safe_module(attr_value, authorized_imports, visited=visited)
+        except Exception as e:
             # lazy / dynamic loading module -> INFO log and skip
             logger.info(
-                f"Skipping import error while copying {raw_module.__name__}.{attr_name}: {type(e).__name__} - {e}"
+                f"Skipping error while copying {module_name}.{attr_name}: {type(e).__name__} - {e}"
             )
             continue
-        # Recursively process nested modules, passing visited set
-        if isinstance(attr_value, ModuleType):
-            attr_value = get_safe_module(attr_value, authorized_imports, visited=visited)
 
         setattr(safe_module, attr_name, attr_value)
 
