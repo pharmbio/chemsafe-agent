@@ -1,6 +1,6 @@
 ---
 name: cheminformatics
-description: Use in all of your task. Always triggered and read this skill
+description: Structure-grounded chemistry evidence and predicted hazard endpoints via RDKit and a QSAR toolbox. Parses and standardizes molecules; computes physicochemical descriptors; screens structural alerts / toxicophores; runs similarity, scaffold/MCS and read-across analogue selection; performs applicability-domain checks; and predicts ADMET, Tox21, ecotoxicity, melting point, explosivity and a draft GHS classification. Use this skill whenever a task involves SMILES, InChI, InChIKey, CAS numbers or chemical structures — including chemical safety assessment, hazard or toxicity screening, QSAR prediction, read-across, PBT/vPvB or GHS work, and weight-of-evidence chemistry — even when the user does not name a specific tool.
 ---
 
 # Cheminformatics Skill (RDKit + QSAR toolbox)
@@ -13,6 +13,8 @@ The repo whitelists `rdkit`, `admet_ai`, and `deepchem` in `core/tools/python_ex
 - `qsar_toolbox.py` — **Tier B**: QSAR / ML hazard-endpoint prediction (ADMET via admet-ai, Tox21 via DeepChem, ecotox baseline-narcosis, empirical melting-point QSAR, SMARTS-based explosivity, and a *draft* GHS rollup that composes them).
 
 Prefer these helpers over rewriting raw RDKit code; drop to raw RDKit only when neither helper exposes what you need.
+
+Bulky lookups — the full descriptor glossary, FilterCatalog citations, ADMET output scales, and ecotox model references — live in [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md). Read that file when you need to interpret a helper's output or cite a model's provenance; you do not need it to call the helpers.
 
 This document describes **capabilities**, not a procedure. Select the capabilities the task needs and call them in whatever order the task implies. The only ordering constraints are the *preconditions* called out on each capability (for example, similarity and identity comparisons require standardized inputs — see [Standardization](#standardization-canonical-identity)).
 
@@ -77,7 +79,7 @@ Rules:
 
 - **`parse_smiles` returns `None` for any unparseable input** — treat as a data-quality failure, not a soft fallback.
 - **Accept SMILES, but also `Chem.MolFromInchi` if the input is an InChI.** Inputs coming from literature often arrive as InChI/InChIKey.
-- **If a CAS or name is provided, resolve it to a structure before parsing.** Use `database_traversal` (`references/id_resolution.md`) or a `pubchempy` call — RDKit does not resolve identifiers.
+- **If a CAS or name is provided, resolve it to a structure before parsing.** Use `database_traversal` or a `pubchempy` call — RDKit does not resolve identifiers.
 - **Preserve the original input in the evidence log.** Every structural claim traces back to the exact string the user supplied, not just the canonical form.
 
 ---
@@ -134,23 +136,7 @@ desc = compute_descriptors(std.canonical_smiles)
 #     "fraction_csp3": ..., "qed_drug_likeness": ...}
 ```
 
-### Descriptor meaning and regulatory use
-
-| Descriptor             | What it tells you                                                  | Line of evidence it supports                      |
-|------------------------|---------------------------------------------------------------------|---------------------------------------------------|
-| molecular_formula      | Atom inventory                                                      | Identity verification, mass spec cross-check      |
-| mw                     | Average molecular weight                                            | Physchem (6), read-across similarity              |
-| exact_mass             | Monoisotopic mass                                                   | MS-based identity verification                    |
-| logp_crippen           | Octanol–water partition; proxy for bioaccumulation, permeability   | Physchem (6), PBT screening, exposure/kinetics    |
-| molar_refractivity     | Polarizability proxy                                                | Reactivity / mechanistic context                  |
-| tpsa                   | Topological polar surface area; permeability proxy                 | Physchem (6), ADME/kinetics                       |
-| hbd / hba              | Hydrogen bond donors / acceptors                                   | Physchem (6), permeability                        |
-| rotatable_bonds        | Conformational flexibility                                          | Physchem (6), drug-likeness                       |
-| aromatic_rings         | Aromatic content                                                    | Reactivity / mechanistic context                  |
-| num_stereocenters      | Stereocenter count                                                  | Identity completeness, QSAR stereo-dependence     |
-| fraction_csp3          | Saturation fraction                                                 | Structural complexity                             |
-| formal_charge          | Species ionization as drawn                                         | Identity verification (should be 0 after standardization with `neutralize=True`) |
-| qed_drug_likeness      | Quantitative Estimate of Drug-likeness (Bickerton et al. 2012)     | Drug-likeness context only — not hazard          |
+For what each key means and the `woe_reasoning` line of evidence it supports, see the descriptor glossary in [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#physicochemical-descriptor-glossary).
 
 Rules:
 
@@ -167,13 +153,7 @@ Use to produce the mechanistic line of evidence (Line 7 in `woe_reasoning`). Pre
 
 ### Built-in RDKit catalogs (preferred)
 
-| Catalog  | What it screens for                                                    | Primary reference                              |
-|----------|------------------------------------------------------------------------|------------------------------------------------|
-| `pains`  | Pan-assay interference compounds (frequent hitters in HTS)             | Baell & Holloway 2010, *J Med Chem* 53:2719    |
-| `brenk`  | Unwanted functionality for drug design (reactive / toxic / unstable)   | Brenk et al. 2008, *ChemMedChem* 3:435         |
-| `nih`    | NIH annotated unwanted features                                        | NIH MLSMR / MLPCN                              |
-| `zinc`   | ZINC15 drug-likeness filters                                           | Sterling & Irwin 2015                          |
-| `chembl` | Structural filters from ChEMBL's curation workflow                     | ChEMBL                                         |
+`build_filter_catalog` accepts these keys: `pains` (HTS frequent hitters), `brenk` (reactive/toxic/unstable functionality), `nih` (NIH annotated unwanted features), `zinc` (ZINC15 drug-likeness), and `chembl` (ChEMBL curation filters). For the authoritative citation to record alongside each hit, see [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#built-in-filtercatalog-provenance).
 
 ```python
 from core.skills.cheminformatics.scripts.cheminformatics import (
@@ -247,7 +227,7 @@ Rules:
 - **Tanimoto alone is not a RAAF justification.** The ECHA RAAF requires mechanistic and metabolic similarity in addition to structural similarity. Use this capability for the structural axis, then combine with mechanistic evidence (Line 7) and ADME evidence (Line 8) in `woe_reasoning`.
 - **Fingerprint type matters.** Morgan/ECFP is the default, but MACCS (166-bit) or AtomPair often rank differently. If the downstream QSAR used a different fingerprint, match it rather than forcing ECFP.
 - **Default radius=2** (≈ ECFP4). Use radius=3 (≈ ECFP6) for finer discrimination when neighbors cluster too tightly.
-- **Explicitly reports molecular similarity values ​​for cases where a "read across" analysis is necessary.**
+- **When read-across is on the table, always report the numeric Tanimoto value(s), not just a pass/fail band.** The similarity number is what `woe_reasoning` weights, and a reviewer needs to see it to judge the analogue.
 
 ---
 
@@ -374,15 +354,7 @@ admet = calc_admet(std.canonical_smiles)
 # admet["LD50_oral_mg_per_kg"], admet["BBB_penetration_prob"], ...
 ```
 
-Scale conventions returned by the helper:
-
-| Suffix / key                       | Scale                                  |
-|------------------------------------|----------------------------------------|
-| `*_prob`                           | probability in [0, 1] (binary classifier) |
-| `LD50_oral_log_mg_per_kg`          | log10(mg/kg); helper also exposes `LD50_oral_mg_per_kg = 10**value` |
-| `caco2_permeability_log_cm_s`      | log10(cm/s)                            |
-| `solubility_log_mol_L`             | log10(mol/L)                           |
-| `VDss_log_L_per_kg`                | log10(L/kg)                            |
+Most endpoints return a `*_prob` in [0, 1]; the dose/permeability/solubility/volume endpoints return log-scaled values (with `LD50_oral_mg_per_kg` also exposed as the un-logged value). For the full unit/scale table, see [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#admet-output-scale-conventions).
 
 Rules:
 
@@ -429,14 +401,7 @@ eco = calc_ecotoxicology(desc)
 # eco["fish_fathead_minnow"]["value_mg_L"], eco["bioconcentration"]["BCF_L_per_kg"], ...
 ```
 
-Endpoint references:
-
-| Endpoint                       | Model reference                                           |
-|--------------------------------|------------------------------------------------------------|
-| Fish (Fathead minnow 96-h LC50)| Veith et al. 1983 (baseline narcosis)                      |
-| Daphnia magna 48-h EC50        | Cronin & Dearden 1995 (baseline narcosis)                  |
-| Green algae 72-h EC50          | Netzeva et al. 2005 (simplified)                           |
-| BCF                            | Meylan et al. 1999                                         |
+The three aquatic endpoints (fish, daphnia, algae) plus BCF each come from a published baseline-narcosis QSAR; see [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#ecotoxicology-model-references) for the model citations.
 
 Rules:
 
