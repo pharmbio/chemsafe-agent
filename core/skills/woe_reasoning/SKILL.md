@@ -1,18 +1,18 @@
 ---
-name: woe_reasoning
+name: woe
 description: Weight-of-evidence (WoE) scoring for chemical safety agents. Use after any documentary search, hazard assessment, toxicity lookup, or endpoint prediction over chemical safety databases to score evidence quality and consistency, rank sources by priority and query domain, flag contradictions between sources, and emit a structured report for a downstream summary agent. Trigger whenever a chemical-safety result needs a confidence score or weight-of-evidence judgement, even if the user does not say "WoE".
 ---
 
-# WoE SKILL — Weight of Evidence for Chemical Safety Agents
+# WoE SKILL: Weight of Evidence for Chemical Safety Agents
 
 ## ROLE
 Triggered automatically after any documentary search over chemical safety databases. Execute all five blocks sequentially; **never skip a block, even when evidence is absent or partial.**
 
 Two bundled references are loaded on demand:
-- `references/alerts.md` — canonical text for ALERT-01…05. Consult when emitting an alert.
-- `references/conditional-cases.md` — full handling for Cases A–I. Consult when a run matches anything beyond Case A.
+- `references/alerts.md`: canonical text for ALERT-01…05. Consult when emitting an alert.
+- `references/conditional-cases.md`: full handling for Cases A–I. Consult when a run matches anything beyond Case A.
 
-## BLOCK 1 — Source Inspection & Extraction
+## BLOCK 1: Source Inspection & Extraction
 
 **1.1 Retrieve** from the search: documents/databases consulted; the relevant fragments/values/statements; the substance under evaluation (**Compound X**).
 
@@ -23,6 +23,7 @@ Two bundled references are loaded on demand:
 | Regulatory | legal limit, classification, GHS, REACH, banned, permitted, exposure limit |
 | Toxicological | LD50, LC50, NOAEL, LOAEL, carcinogen, mutagen, toxic dose, mechanism of toxicity |
 | Phytochemical | plant origin, natural compound, secondary metabolite, alkaloid, flavonoid |
+| Drug-like | bioavailability, drug-likeness, pharmacokinetics |
 | Environmental | ecotoxicity, aquatic toxicity, bioaccumulation, soil residue, PNEC |
 | Safety/Hazard | SDS, flash point, flammability, explosive, corrosive, PPE, handling |
 
@@ -34,7 +35,7 @@ For each **Q** item also record `MODEL_TYPE`: **Q-vivo** (animal studies, human 
 
 **1.4 No documents retrieved** → `EVIDENCE_FOUND = FALSE`, `C = 0`, emit **ALERT-01**; **skip Blocks 2–3, go to Block 4**. Otherwise `EVIDENCE_FOUND = TRUE`, continue.
 
-## BLOCK 2 — Categorization
+## BLOCK 2: Categorization
 
 **2.1 Source priority** (assign per source):
 
@@ -50,13 +51,14 @@ For each **Q** item also record `MODEL_TYPE`: **Q-vivo** (animal studies, human 
 - **2.1.2** Store as `SOURCE_LIST`, one entry per data point. Same database with 3 studies → 3 separate entries, each counted independently in T. Entry schema: `entry_id, source_name, priority_level (1–5), evidence_type (Q/N), model_type (Q-vivo/Q-vitro/Q-silico/Q-unknown; null for N), retrieved_content, agrees (filled in Block 3)`.
 - **2.1.3** If all sources are priority 1 → treat as `EVIDENCE_FOUND = FALSE`: `C = 0`, emit ALERT-01.
 
-**2.2 Domain routing** — verify the expected databases were consulted per `QUERY_TYPE`:
+**2.2 Domain routing**: verify the expected databases were consulted per `QUERY_TYPE`:
 
 | Type | Expected Databases |
 |---|---|
 | Regulatory | PubChem (LCSS), ECHA Chem, NIOSH, OPCW |
 | Toxicological | ISSTOX, T3DB, ECOTOX, EnviroTox |
 | Phytochemical | PubChem |
+| Drug-like | PubChem, ECHA Chem |
 | Environmental | ERED (USACE), ECOTOX, EnviroTox |
 | Safety/Hazard | PubChem (LCSS), ECHA Chem, NIOSH, OPCW, OpenFoodTox |
 
@@ -64,7 +66,7 @@ For each **Q** item also record `MODEL_TYPE`: **Q-vivo** (animal studies, human 
 - **2.2.2** Any expected DB not consulted → emit **ALERT-02**.
 - **2.2.3** Multi-type query → merge the expected lists and evaluate coverage across all of them.
 
-## BLOCK 3 — Scoring
+## BLOCK 3: Scoring
 
 **3.1 Confidence score `C = A / T`**
 - **T** = sources in `SOURCE_LIST` with usable info (priority ≥ 2, or priority 3–5 for the relevant data point).
@@ -72,7 +74,7 @@ For each **Q** item also record `MODEL_TYPE`: **Q-vivo** (animal studies, human 
 
 Agreement criteria:
 - **Type Q:** value/range consistent with the primary position. Same order of magnitude AND same hazard-class boundary → agrees; different order of magnitude OR crossing a regulatory threshold → disagrees. A source reporting uncertainty bounds agrees if the primary position falls within them.
-- **Type N:** directionally consistent, assessed qualitatively — e.g. "full PPE + respirator" agrees with high acute toxicity; "no special precautions required" disagrees. If not mappable to the primary finding → `agrees = N/A`, **exclude from both T and A**.
+- **Type N:** directionally consistent, assessed qualitatively, e.g. "full PPE + respirator" agrees with high acute toxicity; "no special precautions required" disagrees. If not mappable to the primary finding → `agrees = N/A`, **exclude from both T and A**.
 
 Each same-database entry is evaluated independently, contributing 0–n to A; intra-database variability lowers C intentionally (an accurate uncertainty signal).
 
@@ -91,7 +93,7 @@ Each same-database entry is evaluated independently, contributing 0–n to A; in
 
 **3.4 Weighted scoring (optional):** `C_weighted = Σ(priorityᵢ × agreementᵢ) / Σ(priorityᵢ)`, where agreementᵢ = 1 if the source agrees, 0 if not. Use when sources differ significantly in priority. Always report whether weighted or unweighted C was used.
 
-## BLOCK 4 — Inconsistency Resolution
+## BLOCK 4: Inconsistency Resolution
 
 **4.1 Detect:** two sources are inconsistent if they report contradictory values/classifications for the same data point (e.g. LD50 500 vs 5000 mg/kg; carcinogen Cat 1B vs not classifiable; banned vs permitted under Regulation X).
 
@@ -109,14 +111,14 @@ Each same-database entry is evaluated independently, contributing 0–n to A; in
 
 **4.5 No inconsistency:** state "No contradictions detected among the consulted sources."
 
-**4.6 Absent evidence** (`EVIDENCE_FOUND = FALSE` or `C = 0`): state "No usable evidence was found for Compound X for this query type." Never fabricate values or infer from model knowledge without disclosing it. Any model-knowledge fallback must be labelled "⚠️ Model-generated estimate — not sourced from consulted databases." Proceed to Block 5.
+**4.6 Absent evidence** (`EVIDENCE_FOUND = FALSE` or `C = 0`): state "No usable evidence was found for Compound X for this query type." Never fabricate values or infer from model knowledge without disclosing it. Any model-knowledge fallback must be labelled "⚠️ Model-generated estimate, not sourced from consulted databases." Proceed to Block 5.
 
-## BLOCK 5 — Explainable Output
+## BLOCK 5: Explainable Output
 
 **5.1** Emit this report (consumed by the summary agent):
 
 ```
-## WoE REPORT — [Compound X] | Query: [QUERY_TYPE]
+## WoE REPORT | [Compound X] | Query: [QUERY_TYPE]
 
 ### 1. Evidence Summary
 - Sources consulted: [N] · Usable (T): [T] · In agreement (A): [A]
@@ -142,10 +144,10 @@ Each same-database entry is evaluated independently, contributing 0–n to A; in
 [1–2 sentences interpreting what C means for this specific query.]
 ```
 
-**5.2 Handoff note** — append to every report:
+**5.2 Handoff note**: append to every report:
 > "This WoE Report is intended for use by the summary agent. The confidence score (C), alerts, and primary finding should be incorporated into the final response to the user. Do not omit alerts from the final summary."
 
-## CONDITIONAL CASES — apply the FIRST match
+## CONDITIONAL CASES: apply the FIRST match
 Full handling for each case is in `references/conditional-cases.md`; read it whenever a run matches anything beyond Case A.
 
 | Case | Match condition | Core action |
@@ -161,12 +163,12 @@ Full handling for each case is in `references/conditional-cases.md`; read it whe
 | I | All items Type N, no Q | C via normative agreement; ALERT-05; Primary Finding = consensus guidance, not a number. |
 
 ## GENERAL CONSTRAINTS
-- **Never fabricate values** — if not in the consulted docs, don't invent; use 4.6 and label model-based estimates.
-- **Never suppress alerts** — ALERT-01 through ALERT-05 must all appear in the final report.
-- **Always compute C explicitly** — state A and T even at C = 0 or C = 1; specify how many Q vs N contributed to T.
-- **Preserve minority findings** — a source overridden by priority still appears in the Source List and is reflected in C.
-- **Language neutrality** — report data as found; do not reinterpret or reframe a source's conclusion beyond what is stated.
-- **Uncertainty propagation** — if a source self-reports uncertainty ("estimated", "provisional"), reflect it in the Narrative even when C is high.
-- **Never collapse multiple database entries** — n studies = n rows; aggregation is never performed silently.
-- **N/A entries do not inflate T** — `agrees = N/A` sources are excluded from T and A but still appear in the Source List.
-- **Model type is informational, not authoritative** — the Q-vivo > Q-vitro > Q-silico hierarchy provides context but never overrides priority-based resolution; both signals are always reported explicitly.
+- **Never fabricate values**: if not in the consulted docs, don't invent; use 4.6 and label model-based estimates.
+- **Never suppress alerts**: ALERT-01 through ALERT-05 must all appear in the final report.
+- **Always compute C explicitly**: state A and T even at C = 0 or C = 1; specify how many Q vs N contributed to T.
+- **Preserve minority findings**: a source overridden by priority still appears in the Source List and is reflected in C.
+- **Language neutrality**: report data as found; do not reinterpret or reframe a source's conclusion beyond what is stated.
+- **Uncertainty propagation**: if a source self-reports uncertainty ("estimated", "provisional"), reflect it in the Narrative even when C is high.
+- **Never collapse multiple database entries**: n studies = n rows; aggregation is never performed silently.
+- **N/A entries do not inflate T**: `agrees = N/A` sources are excluded from T and A but still appear in the Source List.
+- **Model type is informational, not authoritative**: the Q-vivo > Q-vitro > Q-silico hierarchy provides context but never overrides priority-based resolution; both signals are always reported explicitly.
