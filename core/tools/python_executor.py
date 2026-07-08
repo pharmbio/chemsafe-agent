@@ -54,6 +54,9 @@ DEFAULT_AUTHORIZED_IMPORTS = [
     'admet_ai',
     'deepchem',
     'core',
+    'asyncio',
+    'subprocess',
+    'textwrap'
 ]
 authorized_imports = sorted(set(BASE_BUILTIN_MODULES) | set(DEFAULT_AUTHORIZED_IMPORTS))
 
