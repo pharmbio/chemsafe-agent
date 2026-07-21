@@ -21,7 +21,14 @@ Chemical safety assessment requires reasoning over heterogeneous data — molecu
 
 - **`python_executor`**: The primary work engine. Code runs through a custom **restricted interpreter** (not raw `exec`), with only an allow-listed set of imports (RDKit, pandas, admet-ai, DeepChem, requests, and the repo's own modules). State persists across calls within a conversation.
 - **`read_files`**: Reads repo files, skill playbooks, and scoped artifacts, all behind a strict path sandbox.
-- **Domain Skills**: Markdown playbooks (plus optional helper scripts) the agent loads on demand — `data_inspection`, `database_traversal` (ECHA/PubChem/NIOSH/OPCW APIs), `data_visualization`, `sop_search`, `literature_search`, `woe_reasoning` (weight-of-evidence), and `cheminformatics` (RDKit + QSAR/ADMET).
+
+**Domain Skills** are markdown playbooks (plus optional helper scripts) the agent loads on demand. They draw on the following resources:
+
+| Category | Resources |
+| --- | --- |
+| **Databases** | ECHA, PubChem, NIOSH |
+| **Guidelines** | ECHA, NIH |
+| **Cheminformatics tools** | Tox21, admet-ai, RDKit (flexible molecular calculation and modification) |
 
 ### Grounding & Memory Systems
 
