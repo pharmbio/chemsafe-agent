@@ -45,3 +45,5 @@ admet-ai>=1.0.0
 deepchem
 tensorflow
 tf-keras
+beautifulsoup4
+typer
