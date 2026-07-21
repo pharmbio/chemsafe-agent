@@ -14,7 +14,6 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
@@ -45,8 +44,10 @@ from app.langgraph_runner import build_stream_input, stream_langgraph_events
 from app.partners import get_partner_organizations
 from app.state import FileRecord, UIState
 from app.ui.chat_timeline import (
+    append_error_block,
     append_user_message,
     export_timeline_snapshot,
+    finalize_active_blocks,
     process_ai_message,
     process_chunk,
     process_tool_call_start,
@@ -331,6 +332,9 @@ def _apply_stream_event(event_type: str, payload: Any, state: UIState) -> bool:
         interrupted, _ = _parse_complete_payload(payload)
         state.waiting_for_approval = interrupted
         state.approval_interrupted = interrupted
+        # Resolve the live spinner on the last agent block once the run settles
+        # (either fully done or paused for plan approval).
+        finalize_active_blocks(state)
         return True
     return False
 
@@ -338,17 +342,12 @@ def _apply_stream_event(event_type: str, payload: Any, state: UIState) -> bool:
 def _record_stream_error(state: UIState, exc: Exception) -> bool:
     state.waiting_for_approval = False
     state.approval_interrupted = False
-    error_text = (
-        "The current run stopped because a tool raised an unhandled error.\n\n"
-        f"{type(exc).__name__}: {exc}\n\n"
-        "You can send another message to correct the issue and continue."
+    message = (
+        "The run stopped before finishing because a tool raised an unhandled error. "
+        "Your conversation is preserved — send another message to adjust the request and continue."
     )
-    return process_ai_message(
-        state,
-        "assistant",
-        SimpleNamespace(content=error_text, id=state.next_message_id("assistant_error")),
-        None,
-    )
+    detail = f"{type(exc).__name__}: {exc}"
+    return append_error_block(state, message, title="Run interrupted", detail=detail)
 
 
 def _drain_pending_stream_events(state: UIState, thread_id: Optional[str]) -> bool:
@@ -1039,6 +1038,15 @@ async def _run_user_message_internal(prompt: str, state: UIState):
                     state.waiting_for_approval = False
                     state.approval_interrupted = False
                     state.current_app_config = None
+                    finalize_active_blocks(state)
+                    if ui_attached:
+                        await _persist_timeline_snapshot(thread_id, state)
+                        yield (
+                            state,
+                            list(state.messages),
+                            gr.update(value=""),
+                            _conversation_panel_update(state),
+                        )
                     if stream_task:
                         stream_task.cancel()
                         with suppress(asyncio.CancelledError):
@@ -1912,6 +1920,54 @@ def build_demo() -> gr.Blocks:
         color: var(--text-main);
         background: transparent;
         white-space: pre;
+    }
+    .agent-error-card {
+        border: 1px solid #d98b8b;
+        border-left: 4px solid #c0392b;
+        border-radius: 0;
+        background: #fdf3f2;
+        padding: 0.9rem 1.05rem;
+        margin: 0.9rem 0;
+    }
+    .agent-error-card__title {
+        font-family: var(--font-ui);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: #a5281b;
+        margin-bottom: 0.35rem;
+    }
+    .agent-error-card__title::before {
+        content: "\\26A0";
+        margin-right: 0.5rem;
+    }
+    .agent-error-card__message {
+        font-family: var(--font-ui);
+        font-size: 0.95rem;
+        line-height: 1.55;
+        color: var(--text-main);
+    }
+    .agent-error-card__detail { margin-top: 0.6rem; }
+    .agent-error-card__detail summary {
+        font-family: var(--font-ui);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-soft);
+        cursor: pointer;
+    }
+    .agent-error-card__detail pre {
+        margin: 0.55rem 0 0;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        background: #ffffff;
+        border: 1px solid #e6c9c6;
+        border-radius: 0;
+        padding: 0.7rem 0.85rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        color: #6b2b23;
     }
     #user-input {
         border: 0 !important;
