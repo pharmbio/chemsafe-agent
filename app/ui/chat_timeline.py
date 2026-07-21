@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from copy import deepcopy
 from html import escape
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -101,6 +102,7 @@ def rebuild_from_plain_messages(
             block = _ensure_agent_block(state, "assistant")
             block["items"].append({"type": "message", "content": content})
             _refresh_block_message(state, block["block_id"])
+    finalize_active_blocks(state)
 
 
 def rebuild_from_raw_messages(
@@ -131,6 +133,7 @@ def rebuild_from_raw_messages(
                 state.processed_message_ids.add(msg_id)
             continue
         _ingest_message(state, raw, agent_name=agent_name)
+    finalize_active_blocks(state)
 
 
 def export_timeline_snapshot(state: UIState) -> Dict[str, Any]:
@@ -150,7 +153,7 @@ def export_timeline_snapshot(state: UIState) -> Dict[str, Any]:
                     "kind": "agent_block",
                     "block_id": block["block_id"],
                     "agent_name": block["agent_name"],
-                    "metadata": metadata or _build_metadata(block["agent_name"], block["block_id"]),
+                    "metadata": metadata or _build_metadata(block["agent_name"], block["block_id"], status="done"),
                     "items": deepcopy(block["items"]),
                 }
             )
@@ -196,6 +199,8 @@ def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> 
 
         if kind == "assistant_plain":
             metadata = deepcopy(entry.get("metadata")) if isinstance(entry.get("metadata"), dict) else {}
+            if metadata.get("status") == "pending":
+                metadata["status"] = "done"
             block_id = metadata.get("id")
             state.messages.append(
                 ChatMessage(
@@ -217,6 +222,8 @@ def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> 
         block_id = str(entry.get("block_id") or state.next_message_id(agent_name))
         metadata = deepcopy(entry.get("metadata")) if isinstance(entry.get("metadata"), dict) else {}
         metadata.setdefault("id", block_id)
+        if metadata.get("status") == "pending":
+            metadata["status"] = "done"
 
         state.messages.append(ChatMessage(role="assistant", content="", metadata=metadata))
         state.message_lookup[block_id] = len(state.messages) - 1
@@ -581,15 +588,82 @@ def _ensure_agent_block(state: UIState, agent_key: str) -> Dict[str, Any]:
         if block and block["agent_name"] == agent_key:
             return block
 
+    # A different agent is taking over: resolve the previous block's spinner
+    # and record how long it ran before starting the new one.
+    _finalize_block(state, last_block_id)
+
     block_id = state.next_message_id(agent_key)
-    metadata = _build_metadata(agent_key, block_id)
+    metadata = _build_metadata(agent_key, block_id, status="pending")
     chat_message = ChatMessage(role="assistant", content="", metadata=metadata)
     state.messages.append(chat_message)
     state.message_lookup[block_id] = len(state.messages) - 1
-    block = {"agent_name": agent_key, "block_id": block_id, "items": []}
+    block = {"agent_name": agent_key, "block_id": block_id, "items": [], "started_at": time.time()}
     state.agent_blocks[block_id] = block
     state.last_agent_block_id = block_id
     return block
+
+
+def _set_block_metadata(state: UIState, block_id: str, **updates: Any) -> None:
+    """Merge ``updates`` into a rendered block's ChatMessage metadata."""
+    idx = state.message_lookup.get(block_id)
+    if idx is None or idx >= len(state.messages):
+        return
+    message = state.messages[idx]
+    metadata = dict(message.metadata) if isinstance(message.metadata, dict) else {}
+    metadata.update(updates)
+    message.metadata = metadata
+
+
+def _finalize_block(state: UIState, block_id: Optional[str], *, status: str = "done") -> None:
+    """Resolve a block's live spinner and stamp its elapsed duration."""
+    if not block_id:
+        return
+    idx = state.message_lookup.get(block_id)
+    if idx is None or idx >= len(state.messages):
+        return
+    current = state.messages[idx].metadata if isinstance(state.messages[idx].metadata, dict) else {}
+    if current.get("status") == status and "duration" in current:
+        return
+    updates: Dict[str, Any] = {"status": status}
+    block = state.agent_blocks.get(block_id)
+    started_at = block.get("started_at") if block else None
+    if started_at:
+        updates["duration"] = round(max(0.0, time.time() - started_at), 1)
+    _set_block_metadata(state, block_id, **updates)
+
+
+def finalize_active_blocks(state: UIState, *, status: str = "done") -> None:
+    """Mark the currently streaming agent block as finished.
+
+    Earlier blocks are finalized on each agent transition, so only the most
+    recent block can still carry a live spinner when a run ends.
+    """
+    _finalize_block(state, state.last_agent_block_id, status=status)
+
+
+def append_error_block(
+    state: UIState,
+    message: str,
+    *,
+    title: str = "Run interrupted",
+    detail: Optional[str] = None,
+) -> bool:
+    """Append a styled error card to the timeline (and resolve any spinner)."""
+    finalize_active_blocks(state)
+    block_id = state.next_message_id("error")
+    metadata = {"title": title, "id": block_id, "status": "done"}
+    state.messages.append(ChatMessage(role="assistant", content="", metadata=metadata))
+    state.message_lookup[block_id] = len(state.messages) - 1
+    block = {
+        "agent_name": "error",
+        "block_id": block_id,
+        "items": [{"type": "error", "title": title, "message": message, "detail": detail}],
+    }
+    state.agent_blocks[block_id] = block
+    # Reset the active pointer so subsequent content opens a fresh agent block.
+    state.last_agent_block_id = None
+    _refresh_block_message(state, block_id)
+    return True
 
 
 def _refresh_block_message(state: UIState, block_id: str) -> None:
@@ -609,7 +683,7 @@ def _refresh_block_message(state: UIState, block_id: str) -> None:
 
 
 def _block_uses_embedded_html(items: List[Dict[str, Any]]) -> bool:
-    return any(item.get("type") in {"tool_call", "tool_result"} for item in items)
+    return any(item.get("type") in {"tool_call", "tool_result", "error"} for item in items)
 
 
 def _restore_tool_lookup_for_block(state: UIState, block: Dict[str, Any]) -> None:
@@ -681,6 +755,14 @@ def _render_block_html(items: List[Dict[str, Any]]) -> str:
                     body_is_html=item.get("content_is_html", False),
                 )
             )
+        elif item_type == "error":
+            sections.append(
+                _render_error_card(
+                    item.get("title"),
+                    item.get("message"),
+                    item.get("detail"),
+                )
+            )
     return f"<div class='agent-block-content'>{''.join(sections)}</div>"
 
 
@@ -710,6 +792,22 @@ def _render_tool_section(title: str, body: str, tool_name: Optional[str], *, bod
         f"{body_markup}"
         "</details>"
     )
+
+
+def _render_error_card(title: Optional[str], message: Optional[str], detail: Optional[str] = None) -> str:
+    parts = ["<div class='agent-error-card'>"]
+    parts.append(
+        f"<div class='agent-error-card__title'>{escape(str(title or 'Something went wrong'))}</div>"
+    )
+    if message:
+        parts.append(f"<div class='agent-error-card__message'>{escape(str(message))}</div>")
+    if detail:
+        parts.append(
+            "<details class='agent-error-card__detail'><summary>Technical details</summary>"
+            f"<pre>{escape(str(detail))}</pre></details>"
+        )
+    parts.append("</div>")
+    return "".join(parts)
 
 
 def _format_tool_call_body(tool_name: Optional[str], args: Any) -> Tuple[str, bool]:
@@ -825,9 +923,9 @@ def _is_ai_stream_chunk(msg: Any, role: str) -> bool:
     return class_name == "aimessagechunk" or role_value == "aimessagechunk"
 
 
-def _build_metadata(agent_name: str, block_id: str) -> Dict[str, Any]:
+def _build_metadata(agent_name: str, block_id: str, *, status: str = "pending") -> Dict[str, Any]:
     label = AGENT_TITLES.get(agent_name, agent_name.replace("_", " ").title())
-    return {"title": label, "id": block_id, "status": "done"}
+    return {"title": label, "id": block_id, "status": status}
 
 
 def _extract_message_seq(block_id: str) -> int:
