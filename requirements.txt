@@ -42,8 +42,10 @@ uvicorn==0.40.0
 chembl_webresource_client==0.10.9
 pubchempy==1.0.5
 admet-ai>=1.0.0
-deepchem
-tensorflow
-tf-keras
-beautifulsoup4
-typer
+deepchem==2.8.1.dev20260220202610
+tensorflow==2.21.0
+tf-keras==2.21.0
+beautifulsoup4==4.14.3
+typer==0.21.1
+bm25s==0.3.10
+pysbd==0.3.4
