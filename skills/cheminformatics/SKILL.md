@@ -7,14 +7,14 @@ description: Structure-grounded chemistry evidence and predicted hazard endpoint
 
 Produce structure-grounded evidence with RDKit, and predicted hazard endpoints with the QSAR toolbox. This skill is the structural-chemistry backbone for the agent: it feeds canonical identifiers into `database_traversal`, physchem descriptors into `woe_reasoning` Line 6, analogue pairs into RAAF read-across justifications, applicability-domain reports that gate QSAR reliance under OECD Principle 3, structural-alert hits into the mechanistic line of evidence, and predicted ADMET/ecotox/GHS endpoints as additional (predicted, AD-gated) evidence rows.
 
-The repo whitelists `rdkit`, `admet_ai`, and `deepchem` in `core/tools/python_executor.py::DEFAULT_AUTHORIZED_IMPORTS`. Two curated helper modules sit under `core/skills/cheminformatics/scripts/`:
+The repo whitelists `rdkit`, `admet_ai`, and `deepchem` in `core/tools/python_executor.py::DEFAULT_AUTHORIZED_IMPORTS`. Two curated helper modules sit under `scripts/`:
 
 - `cheminformatics.py` — **Tier A**: deterministic, RDKit-only structural operations (parse, standardize, descriptors, alerts, similarity, scaffold/MCS, applicability domain, visualization).
 - `qsar_toolbox.py` — **Tier B**: QSAR / ML hazard-endpoint prediction (ADMET via admet-ai, Tox21 via DeepChem, ecotox baseline-narcosis, empirical melting-point QSAR, SMARTS-based explosivity, and a *draft* GHS rollup that composes them).
 
 Prefer these helpers over rewriting raw RDKit code; drop to raw RDKit only when neither helper exposes what you need.
 
-Bulky lookups — the full descriptor glossary, FilterCatalog citations, ADMET output scales, and ecotox model references — live in [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md). Read that file when you need to interpret a helper's output or cite a model's provenance; you do not need it to call the helpers.
+Bulky lookups — the full descriptor glossary, FilterCatalog citations, ADMET output scales, and ecotox model references — live in [`references/reference-tables.md`](references/reference-tables.md). Read that file when you need to interpret a helper's output or cite a model's provenance; you do not need it to call the helpers.
 
 This document describes **capabilities**, not a procedure. Select the capabilities the task needs and call them in whatever order the task implies. The only ordering constraints are the *preconditions* called out on each capability (for example, similarity and identity comparisons require standardized inputs — see [Standardization](#standardization-canonical-identity)).
 
@@ -67,7 +67,7 @@ Tier-B outputs never carry an authoritative classification on their own. The dra
 Use when an input arrives as a SMILES string and you need an RDKit `Mol`, or you need to verify that a user-supplied identifier is parseable at all.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import parse_smiles
+from scripts.cheminformatics import parse_smiles
 
 mol = parse_smiles(user_smiles)
 if mol is None:
@@ -91,7 +91,7 @@ Use whenever the canonical form of a molecule is needed: cross-database lookup k
 **Precondition for:** similarity, nearest-neighbor search, applicability-domain checks, identity matching against PubChem / ChEMBL / NIOSH, and any read-across analogue selection. Comparing unstandardized SMILES produces false negatives in identity matching and false positives in read-across.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import standardize_smiles
+from scripts.cheminformatics import standardize_smiles
 
 std = standardize_smiles(user_smiles)
 canonical = std.canonical_smiles   # for SMILES-keyed comparisons
@@ -126,7 +126,7 @@ Rules:
 Use to produce the physicochemical line of evidence (Line 6 in `woe_reasoning`), to supply features for PBT / vPvB screening, or to provide ADME/kinetics context. The Tier-B helpers (`calc_drug_likeness`, `calc_ecotoxicology`, `calc_melting_point`) consume the same dict, so you only compute it once.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import compute_descriptors, lipinski_flags
+from scripts.cheminformatics import compute_descriptors, lipinski_flags
 
 desc = compute_descriptors(std.canonical_smiles)
 # -> {"molecular_formula": ..., "mw": ..., "exact_mass": ..., "heavy_atoms": ...,
@@ -136,7 +136,7 @@ desc = compute_descriptors(std.canonical_smiles)
 #     "fraction_csp3": ..., "qed_drug_likeness": ...}
 ```
 
-For what each key means and the `woe_reasoning` line of evidence it supports, see the descriptor glossary in [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#physicochemical-descriptor-glossary).
+For what each key means and the `woe_reasoning` line of evidence it supports, see the descriptor glossary in [`references/reference-tables.md`](references/reference-tables.md#physicochemical-descriptor-glossary).
 
 Rules:
 
@@ -153,10 +153,10 @@ Use to produce the mechanistic line of evidence (Line 7 in `woe_reasoning`). Pre
 
 ### Built-in RDKit catalogs (preferred)
 
-`build_filter_catalog` accepts these keys: `pains` (HTS frequent hitters), `brenk` (reactive/toxic/unstable functionality), `nih` (NIH annotated unwanted features), `zinc` (ZINC15 drug-likeness), and `chembl` (ChEMBL curation filters). For the authoritative citation to record alongside each hit, see [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#built-in-filtercatalog-provenance).
+`build_filter_catalog` accepts these keys: `pains` (HTS frequent hitters), `brenk` (reactive/toxic/unstable functionality), `nih` (NIH annotated unwanted features), `zinc` (ZINC15 drug-likeness), and `chembl` (ChEMBL curation filters). For the authoritative citation to record alongside each hit, see [`references/reference-tables.md`](references/reference-tables.md#built-in-filtercatalog-provenance).
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import (
+from scripts.cheminformatics import (
     build_filter_catalog, find_structural_alerts,
 )
 
@@ -170,7 +170,7 @@ hits = find_structural_alerts(std.canonical_smiles, catalog=catalog)
 For regulator-defined alerts not in the built-in sets (e.g. Ashby–Tennant genotoxicity alerts, Benigni–Bossa carcinogenicity alerts, Cramer classes for TTC), encode them as SMARTS and match explicitly:
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import match_custom_smarts
+from scripts.cheminformatics import match_custom_smarts
 
 # Example: aromatic amine (Ashby–Tennant alert for genotoxic carcinogenicity)
 ALERT_AROMATIC_AMINE = "[NX3;H2,H1;!$(NC=O);!$(N=*)]-c"
@@ -197,7 +197,7 @@ Use to feed `woe_reasoning`'s RAAF row, to pick analogues for read-across, or to
 **Precondition:** target and candidate SMILES must be standardized consistently (see [Standardization](#standardization-canonical-identity)). Comparing unstandardized inputs produces silently wrong rankings.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import (
+from scripts.cheminformatics import (
     morgan_fingerprint, tanimoto, nearest_neighbors,
 )
 
@@ -236,7 +236,7 @@ Rules:
 Use for category-style grouping or for extracting a shared substructure across a target + analogue set (e.g. to justify a chemical category in a RAAF dossier).
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import (
+from scripts.cheminformatics import (
     maximum_common_substructure, murcko_scaffold_smiles,
 )
 
@@ -261,7 +261,7 @@ Use whenever a QSAR prediction will enter `woe_reasoning`. Without an AD report,
 **Precondition:** target SMILES and the training-set SMILES must be standardized with the same flags.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import applicability_domain_check
+from scripts.cheminformatics import applicability_domain_check
 
 ad = applicability_domain_check(
     target_smiles=std.canonical_smiles,
@@ -288,7 +288,7 @@ Rules:
 Use for dossier figures and read-across tables — grid rendering of the target plus its analogues.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import draw_molecules
+from scripts.cheminformatics import draw_molecules
 
 img = draw_molecules(
     [std.canonical_smiles, *top_analogues],
@@ -311,7 +311,7 @@ Rules:
 
 # Tier B — QSAR endpoint prediction
 
-All Tier-B helpers live in `core.skills.cheminformatics.scripts.qsar_toolbox` and consume a canonical SMILES (or, where indicated, a descriptor dict from `compute_descriptors`). Heavy dependencies (`admet-ai`, `deepchem`) are optional — when missing, the relevant helpers return `{"status": "unavailable", "note": "pip install ..."}` instead of raising.
+All Tier-B helpers live in `scripts.qsar_toolbox` and consume a canonical SMILES (or, where indicated, a descriptor dict from `compute_descriptors`). Heavy dependencies (`admet-ai`, `deepchem`) are optional — when missing, the relevant helpers return `{"status": "unavailable", "note": "pip install ..."}` instead of raising.
 
 ## Drug-likeness Rules (composite)
 
@@ -320,8 +320,8 @@ Use to get Lipinski Ro5, Veber, Egan, and Ghose flags in one call from a descrip
 **Precondition:** call `compute_descriptors` first; pass the returned dict.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import compute_descriptors
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_drug_likeness
+from scripts.cheminformatics import compute_descriptors
+from scripts.qsar_toolbox import calc_drug_likeness
 
 desc = compute_descriptors(std.canonical_smiles)
 drug = calc_drug_likeness(desc)
@@ -344,7 +344,7 @@ Use to predict 23 ADMET / toxicity endpoints (AMES, hERG, DILI, LD50, skin sensi
 **Precondition:** canonical SMILES (run `standardize_smiles` first). Each endpoint has its own published AD that must be checked under [Applicability Domain](#applicability-domain-qsar-principle-3) before the prediction can be weighted.
 
 ```python
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_admet, ADMET_AI_OK
+from scripts.qsar_toolbox import calc_admet, ADMET_AI_OK
 
 if not ADMET_AI_OK:
     raise RuntimeError("admet-ai not installed")
@@ -354,7 +354,7 @@ admet = calc_admet(std.canonical_smiles)
 # admet["LD50_oral_mg_per_kg"], admet["BBB_penetration_prob"], ...
 ```
 
-Most endpoints return a `*_prob` in [0, 1]; the dose/permeability/solubility/volume endpoints return log-scaled values (with `LD50_oral_mg_per_kg` also exposed as the un-logged value). For the full unit/scale table, see [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#admet-output-scale-conventions).
+Most endpoints return a `*_prob` in [0, 1]; the dose/permeability/solubility/volume endpoints return log-scaled values (with `LD50_oral_mg_per_kg` also exposed as the un-logged value). For the full unit/scale table, see [`references/reference-tables.md`](references/reference-tables.md#admet-output-scale-conventions).
 
 Rules:
 
@@ -372,7 +372,7 @@ Use to predict activity for the 12 Tox21 endpoints: 7 nuclear receptors (NR-AR, 
 **Precondition:** canonical SMILES. First call downloads ~10 MB of data and trains the model (~5 min on CPU); subsequent calls restore from `~/.cache/chemical_safety_calc/tox21_graphconv/` in <10 s. The cache survives container restarts only if the cache dir is mounted as a volume.
 
 ```python
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_tox21
+from scripts.qsar_toolbox import calc_tox21
 
 tox21 = calc_tox21(std.canonical_smiles)
 # tox21["NR-AR"] == {"probability_active": 0.12, "prediction": "inactive"}
@@ -393,15 +393,15 @@ Use to produce predicted aquatic toxicity endpoints (fish 96-h LC50, daphnia 48-
 **Precondition:** descriptor dict from `compute_descriptors`. Models are valid for non-ionic organics with logP ~0–7 and MW ~50–500; reactive, electrophilic, or ionisable compounds may deviate >1 log unit — flag explicitly in `woe_reasoning`.
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import compute_descriptors
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_ecotoxicology
+from scripts.cheminformatics import compute_descriptors
+from scripts.qsar_toolbox import calc_ecotoxicology
 
 desc = compute_descriptors(std.canonical_smiles)
 eco = calc_ecotoxicology(desc)
 # eco["fish_fathead_minnow"]["value_mg_L"], eco["bioconcentration"]["BCF_L_per_kg"], ...
 ```
 
-The three aquatic endpoints (fish, daphnia, algae) plus BCF each come from a published baseline-narcosis QSAR; see [`core/skills/cheminformatics/references/reference-tables.md`](core/skills/cheminformatics/references/reference-tables.md#ecotoxicology-model-references) for the model citations.
+The three aquatic endpoints (fish, daphnia, algae) plus BCF each come from a published baseline-narcosis QSAR; see [`references/reference-tables.md`](references/reference-tables.md#ecotoxicology-model-references) for the model citations.
 
 Rules:
 
@@ -418,7 +418,7 @@ Use to get a quick melting-point estimate when no experimental Tm is available.
 **Precondition:** descriptor dict from `compute_descriptors`.
 
 ```python
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_melting_point
+from scripts.qsar_toolbox import calc_melting_point
 
 mp = calc_melting_point(desc)
 # mp["melting_point_C"], mp["uncertainty"] == "+/- 40-60 C (QSAR estimate)"
@@ -439,8 +439,8 @@ Use to flag energetic functional groups (nitro, nitroso, organic peroxide, hydro
 **Precondition:** RDKit `Mol` (from `parse_smiles`).
 
 ```python
-from core.skills.cheminformatics.scripts.cheminformatics import parse_smiles
-from core.skills.cheminformatics.scripts.qsar_toolbox import calc_explosivity
+from scripts.cheminformatics import parse_smiles
+from scripts.qsar_toolbox import calc_explosivity
 
 mol = parse_smiles(std.canonical_smiles)
 expl = calc_explosivity(mol)
@@ -463,7 +463,7 @@ Use to get a draft GHS hazard summary (signal word, H-codes, pictograms, PBT fla
 **Precondition:** the descriptor / admet / eco / explosivity dicts from the helpers above.
 
 ```python
-from core.skills.cheminformatics.scripts.qsar_toolbox import classify_ghs
+from scripts.qsar_toolbox import classify_ghs
 
 ghs = classify_ghs(desc, admet, eco, expl)
 # ghs["signal_word"] in {"DANGER", "WARNING", "No hazards identified"}
@@ -484,7 +484,7 @@ Rules:
 Use when you want every Tier-B endpoint in one nested dict — for a screening report, the first row of a comparison table, or an initial triage of a new chemical.
 
 ```python
-from core.skills.cheminformatics.scripts.qsar_toolbox import calculate_chemical_safety
+from scripts.qsar_toolbox import calculate_chemical_safety
 
 result = calculate_chemical_safety("CC(=O)Oc1ccccc1C(=O)O")  # Aspirin
 # Keys: smiles_input, canonical_smiles, physicochemical, drug_likeness,
@@ -528,7 +528,7 @@ Use to compare a small compound library on a fixed set of columns — useful for
 
 ```python
 import pandas as pd
-from core.skills.cheminformatics.scripts.qsar_toolbox import calculate_chemical_safety
+from scripts.qsar_toolbox import calculate_chemical_safety
 
 compounds = {
     "Aspirin":     "CC(=O)Oc1ccccc1C(=O)O",

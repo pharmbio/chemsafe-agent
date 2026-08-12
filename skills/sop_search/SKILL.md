@@ -71,7 +71,7 @@ queries = [
 Run each query through retriever:
 
 ```python
-from core.skills.sop_search.scripts.sop_search import sop_search
+from scripts.sop_search import sop_search
 
 all_sops = {}
 for query in queries:

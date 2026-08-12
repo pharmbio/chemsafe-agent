@@ -380,7 +380,7 @@ plt.close()
 - ALWAYS run `figure_check("path-to-figure.png")` after saving — fix any issues before proceeding
 
 ```python
-from core.skills.data_visualization.scripts.figure_check import figure_check
+from scripts.figure_check import figure_check
 
 feedbacks = figure_check("path-to-figure.png")
 ```

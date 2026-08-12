@@ -2,7 +2,7 @@
 
 **Source type:** Async Python toolset over ECHA CHEM JSON APIs + rendered dossier HTML
 **Base URL:** `https://chem.echa.europa.eu`
-**Toolset:** `core/skills/database_traversal/scripts/echa_api/` (call the resolver + `tool_*` coroutines — do not write raw HTTP)
+**Toolset:** `scripts/echa_api/` (call the resolver + `tool_*` coroutines — do not write raw HTTP)
 **Auth:** None. (The client sets a browser User-Agent and uses `verify=False`; TLS verification is intentionally relaxed for this host.)
 **Rate limit:** No published limit. Be gentle — call sequentially, and prefer summary/section-filtered tools over full dossier dumps.
 
@@ -15,7 +15,7 @@ ECHA CHEM is the European Chemicals Agency's public database. Use it for the **E
 Every tool is keyed by an **ECHA substance index**, a dotted number like `100.000.002` (formaldehyde). This is ECHA's InfoCard / list number — *not* a CAS or EC number, and it cannot be computed from either. So **the first step of any ECHA task is to resolve the chemical to its index** with `substance_id_resolve`, then pass that index into every other tool.
 
 ```python
-from core.skills.database_traversal.scripts.echa_api.substance_id_resolve import (
+from scripts.echa_api.substance_id_resolve import (
     resolve_substance_index,   # name/CAS -> single best index (use this)
     search_substances,         # name/CAS -> all candidates (use to disambiguate)
 )
@@ -45,13 +45,13 @@ The tools are `async` and share a single module-level `httpx` connection pool. T
 import asyncio
 import json
 
-from core.skills.database_traversal.scripts.echa_api.substance_id_resolve import resolve_substance_index
-from core.skills.database_traversal.scripts.echa_api.tools import (
+from scripts.echa_api.substance_id_resolve import resolve_substance_index
+from scripts.echa_api.tools import (
     tool_get_substance_info,
     tool_get_harmonised_classification,
     tool_get_toxicology_summary,
 )
-from core.skills.database_traversal.scripts.echa_api.echa_client import get_client
+from scripts.echa_api.echa_client import get_client
 
 
 async def fetch_echa(query: str) -> dict:
@@ -78,14 +78,14 @@ Every coroutine returns a **JSON string** — parse it with `json.loads`. On fai
 
 ## Tool catalog
 
-Resolver — import from `core.skills.database_traversal.scripts.echa_api.substance_id_resolve`:
+Resolver — import from `scripts.echa_api.substance_id_resolve`:
 
 | Tool | Returns | Use when |
 |---|---|---|
 | `resolve_substance_index(query, max_results=10)` | Best-match index + ranked candidates (`resolved`, `ambiguous`, `substance_index`) | **Step 0** — turn a name/CAS into an index before anything else |
 | `search_substances(query, max_results=10)` | All raw candidates (each with its `substance_index`) | Disambiguate an ambiguous name; browse every match |
 
-Data tools — import from `core.skills.database_traversal.scripts.echa_api.tools`:
+Data tools — import from `scripts.echa_api.tools`:
 
 | Tool | Returns | Use when |
 |---|---|---|
@@ -151,14 +151,14 @@ A name/CAS-in, hazard-profile-out workflow: resolve the index first (Step 0), th
 import asyncio
 import json
 
-from core.skills.database_traversal.scripts.echa_api.substance_id_resolve import resolve_substance_index
-from core.skills.database_traversal.scripts.echa_api.tools import (
+from scripts.echa_api.substance_id_resolve import resolve_substance_index
+from scripts.echa_api.tools import (
     tool_get_substance_info,
     tool_get_harmonised_classification,
     tool_get_clp_classification,
     tool_get_toxicology_summary,
 )
-from core.skills.database_traversal.scripts.echa_api.echa_client import get_client
+from scripts.echa_api.echa_client import get_client
 
 
 async def echa_hazard_profile(query: str) -> dict:

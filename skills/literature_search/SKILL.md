@@ -58,7 +58,7 @@ queries = [
 ## Step 4 — Retrieve
 
 ```python
-from core.skills.literature_search.scripts.literature_search import (
+from scripts.literature_search import (
     batch_literature_search,
     dedupe_across_queries,
     format_passages_for_prompt,

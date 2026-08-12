@@ -24,7 +24,7 @@ record = requests.get(f"{base}/pug_view/data/compound/{cid}/JSON").json()
 # then recurse record["Record"]["Section"], matching TOCHeading — see pubchem.md
 ```
 
-Read `core/skills/database_traversal/references/pubchem.md` for the full access pattern and extraction code.
+Read `references/pubchem.md` for the full access pattern and extraction code.
 
 ### NIOSH NPG — HTML Index + Detail Page Scraping
 
@@ -38,7 +38,7 @@ entry = find_niosh_entry("acetone", df_niosh)   # local filter by name/CAS
 data = scrape_niosh_page(entry["link"])         # slice detail HTML between section titles
 ```
 
-Read `core/skills/database_traversal/references/niosh.md` for scraping patterns and section extraction.
+Read `references/niosh.md` for scraping patterns and section extraction.
 
 ### OPCW — Embedded Power BI API
 
@@ -52,13 +52,13 @@ name_col = df_opcw.columns[0]
 matches = df_opcw[df_opcw[name_col].str.lower().str.contains("sarin", na=False)]  # filter locally
 ```
 
-Read `core/skills/database_traversal/references/opcw.md` for the full payload, headers, and DSR parser.
+Read `references/opcw.md` for the full payload, headers, and DSR parser.
 
 ### ECHA CHEM — EU Regulatory Classification + REACH Dossiers
 
 ECHA CHEM is the authoritative source for **EU regulatory hazard data**: the legally binding harmonised classification (Annex VI of CLP), industry CLP notifications, and the study-level data registrants file under REACH — DN(M)ELs, PBT/vPvB assessments, and the full tox/ecotox record. It complements PubChem (broad, global) and NIOSH (US occupational) with the European regulatory view.
 
-Access is a self-contained **async Python toolset** under `core/skills/database_traversal/scripts/echa_api/` — call the `tool_*` coroutines, not raw HTTP. Everything is keyed by an **ECHA substance index** (e.g. `100.000.002` for formaldehyde), so Step 0 is always resolving the chemical to its index. Two data planes sit behind the tools: fast JSON APIs (identifiers, CLP and harmonised classification) and slower *rendered dossier HTML* scraped page-by-page (REACH Section 2.1 GHS, 2.3 PBT, 5/6 ecotox, 7 toxicology) — prefer summary/section-filtered variants over the full toxicology dump.
+Access is a self-contained **async Python toolset** under `scripts/echa_api/` — call the `tool_*` coroutines, not raw HTTP. Everything is keyed by an **ECHA substance index** (e.g. `100.000.002` for formaldehyde), so Step 0 is always resolving the chemical to its index. Two data planes sit behind the tools: fast JSON APIs (identifiers, CLP and harmonised classification) and slower *rendered dossier HTML* scraped page-by-page (REACH Section 2.1 GHS, 2.3 PBT, 5/6 ecotox, 7 toxicology) — prefer summary/section-filtered variants over the full toxicology dump.
 
 The tools are `async` and share one connection pool bound to a single event loop, so keep **all ECHA awaits inside one `asyncio.run(...)`** — scattering multiple `asyncio.run()` calls raises loop errors.
 
@@ -73,7 +73,7 @@ data = asyncio.run(fetch("formaldehyde"))   # one asyncio.run — never per-comp
 
 A distinction the tools mirror, and which the question must disambiguate: **harmonised classification** (official, Commission-adopted, not every substance has one) vs **CLP notification** (industry self-classification, majority-vote style) vs **REACH Section 2.1 GHS** (the lead registrant's own classification). These can disagree.
 
-Read `core/skills/database_traversal/references/ECHA.md` for the tool catalog, substance-index resolution, and full pipeline templates.
+Read `references/ECHA.md` for the tool catalog, substance-index resolution, and full pipeline templates.
 
 ---
 
@@ -81,7 +81,7 @@ Read `core/skills/database_traversal/references/ECHA.md` for the tool catalog, s
 
 **Choose the source based on what the user actually needs, not just what's easiest to query.** Occupational exposure limits → NIOSH. CWC schedule status → OPCW. Broad safety summary, GHS, physical properties → PubChem. EU harmonised/CLP classification, DNELs, PBT status, or REACH study data → ECHA CHEM. When concerns overlap, start with PubChem and supplement with NIOSH or ECHA.
 
-**Resolve identifiers before fetching data.** Every source requires mapping a human query — a name, synonym, CAS number — to a source-specific identifier or match, and the resolution approach differs per source. Read `core/skills/database_traversal/references/id_resolution.md` for normalization, CAS detection, cross-source resolution, and handling ambiguous multi-match results.
+**Resolve identifiers before fetching data.** Every source requires mapping a human query — a name, synonym, CAS number — to a source-specific identifier or match, and the resolution approach differs per source. Read `references/id_resolution.md` for normalization, CAS detection, cross-source resolution, and handling ambiguous multi-match results.
 
 **Return structured dicts, never raw responses.** Every retrieval function should return a typed dict with at minimum `found` (bool), `query` (original input), and either data fields or a `reason` string on failure. Never surface raw HTML, unparsed JSON, or exceptions to the caller.
 

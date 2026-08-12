@@ -12,7 +12,11 @@ warnings.filterwarnings("ignore")
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
-from core.skills.cheminformatics.scripts.cheminformatics import (
+from backend.utils.skill_paths import register_skill_scripts
+
+register_skill_scripts()  # sibling skill scripts import as `scripts.<module>`
+
+from scripts.cheminformatics import (
     compute_descriptors,
     parse_smiles,
     standardize_smiles,
