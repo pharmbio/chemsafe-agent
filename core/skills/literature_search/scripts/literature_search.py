@@ -143,7 +143,11 @@ def format_passages_for_prompt(
     *,
     max_passages: Optional[int] = None,
 ) -> str:
-    """Render passages as a compact block suitable for in-context reasoning."""
+    """Render passages as a compact block suitable for in-context reasoning.
+
+    The full set is wrapped once in `<document>` tags; individual passages are
+    delimited by `--- Passage #n ---` headers inside that single wrapper.
+    """
     if not passages:
         return "No literature passages retrieved."
 
@@ -160,7 +164,7 @@ def format_passages_for_prompt(
             f"Score: {passage.score:.3f}\n"
             f"Content: {passage.text}\n"
         )
-    return "".join(chunks)
+    return "<document>" + "".join(chunks) + "</document>\n"
 
 
 def dedupe_across_queries(
