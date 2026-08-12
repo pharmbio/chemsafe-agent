@@ -21,13 +21,19 @@ from backend.utils.output_paths import (
     resolve_output_folder,
     task_file_path,
 )
+from backend.utils.skill_paths import register_skill_scripts
 from backend.utils.storage_paths import thread_data_root
 
+# Makes every skill's helper modules importable as `scripts.<module>`, so a
+# SKILL.md can reference its own scripts by short path.
+register_skill_scripts()
 
 DEFAULT_AUTHORIZED_IMPORTS = [
     'app',
     'backend',
     'core',
+    'skills',
+    'scripts',
     'json',
     'pathlib',
     'sqlalchemy',

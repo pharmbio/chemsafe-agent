@@ -1,12 +1,10 @@
 from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILLS_DIR = REPO_ROOT / "core" / "skills"
+from backend.utils.skill_paths import REPO_ROOT, SKILLS_DIR, skill_path
 
 
 def _get_skill_path(skill_name: str) -> Path:
-    skill_dir = SKILLS_DIR / skill_name
+    skill_dir = skill_path(skill_name)
     candidates = (
         skill_dir / "SKILL.md",
         skill_dir / f"{skill_name}.md",
