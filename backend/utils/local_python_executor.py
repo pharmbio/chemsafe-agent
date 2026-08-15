@@ -24,6 +24,7 @@ import logging
 import math
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Mapping
 from functools import wraps
 from importlib import import_module
@@ -132,12 +133,12 @@ ERRORS = {
     if isinstance(getattr(builtins, name), type) and issubclass(getattr(builtins, name), BaseException)
 }
 
-DEFAULT_MAX_LEN_OUTPUT = 5000000
+# Print output is transcript content: it is re-sent to the model on every
+# subsequent call in the run, so the old 5,000,000-char ceiling was effectively
+# no ceiling at all. Callers may still override per executor.
+DEFAULT_MAX_LEN_OUTPUT = 20000
 MAX_OPERATIONS = 1000000000
 MAX_WHILE_ITERATIONS = 100000000
-
-# Global persistent executor instance for maintaining namespace across executions
-_global_executor = None
 
 
 def custom_print(*args):
@@ -938,9 +939,17 @@ def evaluate_name(
     builtin = resolve_builtin(name.id)
     if builtin is not None:
         return builtin
-    close_matches = difflib.get_close_matches(name.id, list(state.keys()))
-    if len(close_matches) > 0:
-        return state[close_matches[0]]
+    # Suggest, never substitute. Silently returning the nearest-named variable
+    # turns a typo into a wrong number with no error: `oel_stel` would quietly
+    # evaluate to `oel_twa`. The caller must name the variable it means.
+    close_matches = difflib.get_close_matches(
+        name.id, [key for key in state if not key.startswith("_")]
+    )
+    if close_matches:
+        raise InterpreterError(
+            f"The variable `{name.id}` is not defined. Did you mean one of these? "
+            f"{close_matches}"
+        )
     raise InterpreterError(f"The variable `{name.id}` is not defined.")
 
 
@@ -1797,32 +1806,144 @@ class LocalPythonExecutor(PythonExecutor):
     #     self.static_tools = {**tools, **BASE_PYTHON_TOOLS.copy()}
 
 
-def reset_executor_state():
+class ExecutionTimeout(InterpreterError):
+    """Raised when a single execution exceeds its wall-clock budget."""
+
+
+DEFAULT_SESSION_KEY = "default"
+DEFAULT_EXECUTION_TIMEOUT_SECONDS = 600
+# How long a call waits for a sibling execution in the same conversation before
+# giving up. Only reachable if a previous call is still running.
+SESSION_ACQUIRE_TIMEOUT_SECONDS = 60
+_MAX_SESSIONS = 32
+# One interpreter per (user, conversation) instead of one per process. The
+# previous single global was shared by every user and every conversation:
+# concurrent runs interleaved in the same namespace, and one conversation's
+# reset_python_state wiped everybody else's variables.
+_executors: "OrderedDict[str, LocalPythonExecutor]" = OrderedDict()
+_registry_lock = threading.RLock()
+_session_locks: Dict[str, threading.RLock] = {}
+
+
+def set_max_executor_sessions(size: int) -> None:
+    """Set how many interpreter sessions stay resident before LRU eviction."""
+    global _MAX_SESSIONS
+    _MAX_SESSIONS = max(1, int(size))
+
+
+def _session_lock(session_key: str) -> threading.RLock:
+    with _registry_lock:
+        lock = _session_locks.get(session_key)
+        if lock is None:
+            lock = threading.RLock()
+            _session_locks[session_key] = lock
+        return lock
+
+
+def _get_executor(session_key: str, authorized_imports: List[str]) -> "LocalPythonExecutor":
+    with _registry_lock:
+        executor = _executors.get(session_key)
+        if executor is None:
+            executor = LocalPythonExecutor(additional_authorized_imports=authorized_imports)
+            _executors[session_key] = executor
+            while len(_executors) > _MAX_SESSIONS:
+                evicted, _ = _executors.popitem(last=False)
+                _session_locks.pop(evicted, None)
+        else:
+            _executors.move_to_end(session_key)
+            new_authorized_imports = list(set(BASE_BUILTIN_MODULES) | set(authorized_imports))
+            if set(executor.authorized_imports) != set(new_authorized_imports):
+                executor.authorized_imports = new_authorized_imports
+        return executor
+
+
+def _drop_session(session_key: str) -> None:
+    """Forget a session's interpreter and lock without touching other sessions."""
+    with _registry_lock:
+        _executors.pop(session_key, None)
+        _session_locks.pop(session_key, None)
+
+
+def _interrupt_thread(thread: threading.Thread) -> None:
+    """Best-effort attempt to unwind a thread that overran its budget.
+
+    Only fires between bytecodes, so it recovers a runaway pure-Python loop but
+    cannot interrupt a blocking socket read. The caller must not depend on it —
+    the session is evicted either way so the conversation stays usable.
     """
-    Reset the global persistent executor state.
-    
-    This function clears all variables and functions defined in previous executions,
-    providing a clean slate for new code execution. Useful for starting fresh
-    computational contexts or clearing accumulated state.
-    
+    thread_id = getattr(thread, "ident", None)
+    if thread_id is None:
+        return
+    try:
+        import ctypes
+
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(thread_id), ctypes.py_object(SystemExit)
+        )
+    except Exception:  # pragma: no cover - platform dependent
+        logger.debug("Could not signal runaway execution thread %s", thread_id)
+
+
+def _call_with_timeout(func, timeout: Optional[float]):
+    """Run `func` in a worker thread and give up on it after `timeout` seconds."""
+    if not timeout or timeout <= 0:
+        return func()
+
+    box: Dict[str, Any] = {}
+
+    def target():
+        try:
+            box["value"] = func()
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the caller
+            box["error"] = exc
+
+    worker = threading.Thread(target=target, daemon=True, name="chemsafe-python-exec")
+    worker.start()
+    worker.join(timeout)
+
+    if worker.is_alive():
+        _interrupt_thread(worker)
+        raise ExecutionTimeout(
+            f"Execution exceeded the {timeout:.0f}s limit and was abandoned."
+        )
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def reset_executor_state(session_key: Optional[str] = None):
+    """
+    Reset persistent executor state.
+
+    Clears variables and functions defined in previous executions. With a
+    session key, only that conversation's interpreter is cleared; without one,
+    every session is cleared.
+
     Example:
-        >>> local_python_executor("x = 42", [])
+        >>> local_python_executor("x = 42", [], session_key="s1")
         42
-        >>> reset_executor_state()
-        >>> local_python_executor("print(x)", [])  # This would raise NameError
+        >>> reset_executor_state("s1")
+        >>> local_python_executor("print(x)", [], session_key="s1")  # NameError
     """
-    global _global_executor
-    _global_executor = None
+    with _registry_lock:
+        if session_key is None:
+            _executors.clear()
+            _session_locks.clear()
+            return
+        _executors.pop(session_key, None)
+        _session_locks.pop(session_key, None)
 
 
 def local_python_executor(
     code: str,
     authorized_imports: List[str],
     variables: Optional[Dict[str, Any]] = None,
+    session_key: str = DEFAULT_SESSION_KEY,
+    timeout: Optional[float] = DEFAULT_EXECUTION_TIMEOUT_SECONDS,
 ):
     """
     Executes Python code in a sandboxed environment with restricted imports for security.
-    Uses a global persistent executor to maintain variable state across executions.
+    Uses a per-session persistent executor to maintain variable state across executions.
     
     This function provides a simplified interface to the LocalPythonExecutor class, allowing
     for safe execution of Python code with controlled access to imports. It evaluates the 
@@ -1843,6 +1964,12 @@ def local_python_executor(
         variables (Optional[Dict[str, Any]]):
             Optional variables to inject into the persistent execution state before
             the code runs. Existing names will be updated for the current execution.
+        session_key (str):
+            Identifies the interpreter session. Callers should scope this to a
+            (user, conversation) pair so state never leaks between them.
+        timeout (Optional[float]):
+            Wall-clock budget in seconds for this call. On expiry the session is
+            dropped and ExecutionTimeout is raised. Pass None to disable.
     
     Returns:
         Any: The result of the last statement in the executed code. If the code raises
@@ -1886,28 +2013,47 @@ def local_python_executor(
         >>> local_python_executor("data = {'a': 1, 'b': 2}; data['a'] + data['b']", [])
         3
     """
-    global _global_executor
-    
-    # Initialize or validate the global executor
-    if _global_executor is None:
-        _global_executor = LocalPythonExecutor(additional_authorized_imports=authorized_imports)
-    else:
-        # Update authorized imports if they've changed
-        new_authorized_imports = list(set(BASE_BUILTIN_MODULES) | set(authorized_imports))
-        if set(_global_executor.authorized_imports) != set(new_authorized_imports):
-            _global_executor.authorized_imports = new_authorized_imports
-    
-    if variables:
-        _global_executor.send_variables(variables)
+    executor = _get_executor(session_key, authorized_imports)
 
-    # Execute using the persistent global executor
-    output, logs, is_final_answer = _global_executor(code_action=code)
-    
+    # Serialize calls within a session: LangChain runs sync tools in a thread
+    # pool, so two turns of the same conversation could otherwise mutate one
+    # interpreter namespace concurrently.
+    lock = _session_lock(session_key)
+    if not lock.acquire(timeout=SESSION_ACQUIRE_TIMEOUT_SECONDS):
+        raise ExecutionTimeout(
+            "A previous execution in this conversation is still running. Wait for "
+            "it to finish, or reset_python_state to start a clean session."
+        )
+    try:
+        if variables:
+            executor.send_variables(variables)
+        output, logs, is_final_answer = _call_with_timeout(
+            lambda: executor(code_action=code), timeout
+        )
+    except ExecutionTimeout:
+        # The worker may still be stuck in a blocking call holding this
+        # interpreter. Drop the session so the next call gets a clean one
+        # instead of queueing behind a thread that may never return.
+        _drop_session(session_key)
+        raise
+    finally:
+        lock.release()
+
     # If output is None but we have print logs, return the logs instead
     if output is None and logs.strip():
         return logs.strip()
-    
+
     return output
 
 
-__all__ = ["evaluate_python_code", "LocalPythonExecutor", "local_python_executor", "reset_executor_state"]
+__all__ = [
+    "evaluate_python_code",
+    "LocalPythonExecutor",
+    "local_python_executor",
+    "reset_executor_state",
+    "set_max_executor_sessions",
+    "ExecutionTimeout",
+    "DEFAULT_EXECUTION_TIMEOUT_SECONDS",
+    "truncate_content",
+    "DEFAULT_SESSION_KEY",
+]
