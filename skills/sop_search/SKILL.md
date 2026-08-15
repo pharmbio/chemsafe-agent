@@ -1,6 +1,6 @@
 ---
 name: sop_search
-description: Use this skill whenever SOPs (Standard Operating Procedures) need to be retrieved to ground any decision, action, or output. Triggers when any agent is about to take a step, apply a numeric limit, or make a decision that should be governed by established procedures. Always use this skill before acting on any domain-specific task — never invent thresholds, rules, or procedures from context alone. Applies across chemical handling, storage, disposal, exposure response, PPE requirements, spill containment, and any other chemical safety domain where SOPs exist.
+description: Retrieve the governing SOPs and standards that must ground a decision — handling, storage, disposal, PPE, exposure response, spill containment, emergency procedures, and the thresholds and limits these documents set. Use before applying any numeric limit, taking a safety-relevant action, or issuing a recommendation. Thresholds, rules and procedures must come from a retrieved SOP and never from prior knowledge or an external database, and where an SOP conflicts with an external source the SOP governs.
 ---
 
 # SOP Retrieval Skill

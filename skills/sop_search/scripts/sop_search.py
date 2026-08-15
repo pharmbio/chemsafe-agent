@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import List
 
-from backend.utils.sop_rag.sop_retriever import EnsembleSOPRetriever
+from backend.utils.sop_rag.sop_retriever import get_sop_retriever
 
 
 def _format_sop_results(documents) -> str:
@@ -32,7 +32,8 @@ def sop_search(
 ) -> str:
     """Search SOP documents via the BM25 + dense ensemble retriever."""
     try:
-        retriever = EnsembleSOPRetriever(
+        # Cached: building the ensemble reloads the BM25 corpus and Chroma.
+        retriever = get_sop_retriever(
             mode='parent_child',
             score_threshold=score_threshold,
             max_results=max_results,

@@ -1,6 +1,6 @@
 ---
-name: databasetraversal
-description: Retrieve and extract chemical safety data from external databases and APIs. Use this skill whenever the agent needs to query, scrape, or traverse chemical safety sources — including PubChem (LCSS, compound records), NIOSH Pocket Guide (occupational exposure limits, PPE, symptoms), OPCW (chemical weapons convention compounds), ECHA CHEM (EU REACH registration dossiers, CLP and harmonised classification, DNELs, PBT/vPvB assessments, ecotoxicity), or any similar regulatory/scientific chemical database. Trigger this skill when the task involves resolving a chemical name or CAS number to safety data, looking up EU regulatory classification or REACH dossier data, traversing nested JSON records from PubChem, scraping HTML index tables followed by detail pages, calling embedded Power BI or undocumented APIs, batch processing a list of compounds, or selecting the right database for a given query type. Always consult this skill before writing any database retrieval code.
+name: database_traversal
+description: Retrieve chemical safety data from external authoritative sources — PubChem compound records and LCSS, the NIOSH Pocket Guide for occupational exposure limits and PPE, OPCW for Chemical Weapons Convention schedules, and ECHA CHEM for REACH dossiers, CLP and harmonised classification, DNELs, PBT and vPvB assessments and ecotoxicity. Use to resolve a chemical name, CAS or EC number to real records, to obtain a classification, exposure limit or hazard statement that must be cited to a source, or to batch-query a list of compounds. Consult it before writing any retrieval code. For values computed from structure rather than looked up, use cheminformatics.
 ---
 
 # Chemical Safety Database Traversal
@@ -19,8 +19,10 @@ The correct traversal pattern is recursive search through `record["Record"]["Sec
 
 ```python
 base = "https://pubchem.ncbi.nlm.nih.gov/rest"
-cid = requests.get(f"{base}/pug/compound/name/{query}/cids/JSON").json()["IdentifierList"]["CID"][0]
-record = requests.get(f"{base}/pug_view/data/compound/{cid}/JSON").json()
+# Always pass an explicit timeout: a request without one can hang until the whole
+# execution is cut off, losing the work done before it.
+cid = requests.get(f"{base}/pug/compound/name/{query}/cids/JSON", timeout=15).json()["IdentifierList"]["CID"][0]
+record = requests.get(f"{base}/pug_view/data/compound/{cid}/JSON", timeout=30).json()
 # then recurse record["Record"]["Section"], matching TOCHeading — see pubchem.md
 ```
 

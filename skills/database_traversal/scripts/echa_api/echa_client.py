@@ -187,3 +187,9 @@ def get_client():
     if _INSTANCE is None:
         _INSTANCE = ECHAClient()
     return _INSTANCE
+
+
+__all__ = [
+    "get_client",
+    "ECHAClient",
+]

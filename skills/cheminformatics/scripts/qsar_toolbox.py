@@ -618,3 +618,15 @@ def calculate_chemical_safety(smiles: str) -> dict:
         "explosivity":        expl,
         "ghs_classification": ghs,
     }
+
+
+__all__ = [
+    "calc_drug_likeness",
+    "calc_admet",
+    "calc_tox21",
+    "calc_ecotoxicology",
+    "calc_melting_point",
+    "calc_explosivity",
+    "classify_ghs",
+    "calculate_chemical_safety",
+]

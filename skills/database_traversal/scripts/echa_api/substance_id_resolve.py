@@ -145,3 +145,10 @@ async def resolve_substance_index(query, max_results=10):
         ensure_ascii=False,
         indent=2,
     )
+
+
+__all__ = [
+    "resolve_substance_index",
+    "search_substances",
+    "looks_like_cas",
+]

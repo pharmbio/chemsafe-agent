@@ -204,3 +204,9 @@ def figure_check(
     feedback = _parse_with_pydantic(raw_evaluation)
 
     return feedback.to_dict()
+
+
+__all__ = [
+    "figure_check",
+    "FigureFeedback",
+]

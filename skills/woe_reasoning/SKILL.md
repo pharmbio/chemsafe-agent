@@ -1,6 +1,6 @@
 ---
-name: woe
-description: Weight-of-evidence (WoE) scoring for chemical safety agents. Use after any documentary search, hazard assessment, toxicity lookup, or endpoint prediction over chemical safety databases to score evidence quality and consistency, rank sources by priority and query domain, flag contradictions between sources, and emit a structured report for a downstream summary agent. Trigger whenever a chemical-safety result needs a confidence score or weight-of-evidence judgement, even if the user does not say "WoE".
+name: woe_reasoning
+description: Weigh already-gathered evidence into a defensible conclusion — score each source for quality and reliability, rank sources by authority for the question actually asked, surface contradictions between them, and emit a structured weight-of-evidence report carrying an explicit confidence level. Use once retrieval or prediction has produced evidence from more than one source, or whenever a chemical safety conclusion needs a stated confidence, even if the user never says weight of evidence.
 ---
 
 # WoE SKILL: Weight of Evidence for Chemical Safety Agents

@@ -1,6 +1,6 @@
 ---
 name: literature_search
-description: Use this skill whenever scientific literature evidence is needed from PubMed / PMC — to ground a WoE conclusion, locate hazard or mechanistic studies for a chemical, find dose-response or epidemiological data, verify a claim, or supplement SOP and database retrieval with peer-reviewed evidence.
+description: Search peer-reviewed literature through PubMed and PMC for passages that support or contradict a specific claim — hazard and mechanistic studies, dose-response data, epidemiology. Use when the evidence required is a published study rather than a database record or an internal procedure, typically to strengthen a weight-of-evidence conclusion or to verify an assertion that no database covers.
 ---
 
 # Literature Search (PubMed / PMC via LitSense2)

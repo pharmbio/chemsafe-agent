@@ -227,3 +227,19 @@ async def resource_hcode_mapping() -> str:
 async def resource_hcode_mapping_json() -> str:
     """GHS Hazard Category to H-code mapping as JSON dict."""
     return json.dumps(get_hcode_mapping_json(), indent=2)
+
+
+__all__ = [
+    "tool_get_substance_info",
+    "tool_list_dossiers",
+    "tool_get_clp_classification",
+    "tool_get_harmonised_classification",
+    "tool_get_reach_ghs",
+    "tool_get_reach_pbt",
+    "tool_get_toxicology_summary",
+    "tool_get_toxicology_studies",
+    "tool_get_toxicology_full",
+    "tool_get_ecotoxicology_data",
+    "resource_hcode_mapping",
+    "resource_hcode_mapping_json",
+]
