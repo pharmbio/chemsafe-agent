@@ -145,21 +145,6 @@ async def load_threads(user_id: str) -> List[ConversationMeta]:
     return [_row_to_meta(row) for row in rows]
 
 
-async def save_threads(user_id: str, threads: List[ConversationMeta]) -> None:
-    await _ensure_schema()
-    user_uuid = _to_uuid(user_id)
-    for meta in threads:
-        if meta.user_id != user_id:
-            continue
-        await _repo.upsert_thread(
-            user_id=user_uuid,
-            thread_id=meta.thread_id,
-            title=meta.title.strip() or DEFAULT_CONVERSATION_TITLE,
-            created_at=datetime.fromisoformat(meta.created_at),
-            updated_at=datetime.fromisoformat(meta.updated_at),
-        )
-
-
 async def create_thread(user_id: str, title: Optional[str] = None) -> ConversationMeta:
     await _ensure_schema()
     resolved_title = (title or DEFAULT_CONVERSATION_TITLE).strip() or DEFAULT_CONVERSATION_TITLE
@@ -178,17 +163,6 @@ async def create_thread(user_id: str, title: Optional[str] = None) -> Conversati
         created_at=timestamp.isoformat(),
         updated_at=timestamp.isoformat(),
         user_id=user_id,
-    )
-
-
-async def upsert_thread(user_id: str, meta: ConversationMeta) -> None:
-    await _ensure_schema()
-    await _repo.upsert_thread(
-        user_id=_to_uuid(user_id),
-        thread_id=meta.thread_id,
-        title=meta.title.strip() or DEFAULT_CONVERSATION_TITLE,
-        created_at=datetime.fromisoformat(meta.created_at),
-        updated_at=datetime.fromisoformat(meta.updated_at),
     )
 
 
@@ -226,12 +200,3 @@ async def save_timeline(user_id: str, thread_id: str, timeline) -> None:
             updated_at=timestamp,
         )
     await _repo.update_thread_timeline(user_uuid, thread_id, timeline if timeline is not None else [])
-
-
-async def load_messages(user_id: str, thread_id: str) -> list[dict]:
-    payload = await load_timeline(user_id, thread_id)
-    return payload if isinstance(payload, list) else []
-
-
-async def save_messages(user_id: str, thread_id: str, messages: list[dict]) -> None:
-    await save_timeline(user_id, thread_id, messages or [])

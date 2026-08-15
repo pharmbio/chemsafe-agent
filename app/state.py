@@ -44,10 +44,21 @@ class UIState:
     processed_tools_ids: Set[str] = field(default_factory=set)
     processed_content_hashes: Set[int] = field(default_factory=set)
     streaming_message_lookup: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    waiting_for_approval: bool = False
-    approval_interrupted: bool = False
+    # The payload the graph passed to `interrupt()` while paused for plan
+    # review, or None when nothing is waiting on the user. This replaces a pair
+    # of booleans that were always assigned the same value and never read by
+    # anything that rendered, so the approval gate was invisible.
+    pending_approval: Optional[Dict[str, Any]] = None
+    # Threads that produced output while the user was looking elsewhere.
     stale_threads: Set[str] = field(default_factory=set)
-    pending_stream_events: Dict[str, List[Any]] = field(default_factory=dict)
+    # The sidebar markup this session was last *sent*. Re-sending identical
+    # markup replaces the panel's DOM and discards the user's scroll position,
+    # so it is compared before being emitted. None means "nothing sent yet",
+    # which must force a send — reset it whenever the panel has to be redrawn.
+    last_panel_markup: Optional[str] = None
+    # Same treatment for the plan panel: it is a `gr.HTML` too, and it holds a
+    # `<details>` the user can collapse, which a re-send would spring open again.
+    last_progress_markup: Optional[str] = None
     thread_files: Dict[str, List[FileRecord]] = field(default_factory=dict)
     uploaded_files: List[FileRecord] = field(default_factory=list)
     last_run_at: Dict[str, datetime] = field(default_factory=dict)
@@ -61,6 +72,15 @@ class UIState:
     auth_error: Optional[str] = None
     pending_reset_token: Optional[str] = None
     session_token: Optional[str] = None
+
+    @property
+    def is_awaiting_approval(self) -> bool:
+        return self.pending_approval is not None
+
+    @property
+    def is_running(self) -> bool:
+        """True when the thread on screen has a run in flight."""
+        return bool(self.current_thread_id and self.current_thread_id in self.running_threads)
 
     def ensure_thread_storage(self, thread_id: str) -> None:
         if thread_id not in self.thread_files:

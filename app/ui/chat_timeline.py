@@ -1,33 +1,29 @@
 from __future__ import annotations
-
-import json
+import gradio as gr
+from gradio.components.chatbot import ChatMessage
 import time
 from copy import deepcopy
 from html import escape
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set
+from markdown_it import MarkdownIt
 
-import gradio as gr
-from gradio.components.chatbot import ChatMessage
-try:
-    from markdown_it import MarkdownIt
-except ImportError:  # pragma: no cover - optional dependency
-    MarkdownIt = None
-try:
-    from markdown import markdown as _markdown_to_html
-except ImportError:  # pragma: no cover - fallback for lean runtimes
-    _markdown_to_html = None
+_markdown_to_html = None
 
 from app.state import UIState
+from app.ui import tool_display
 from app.ui.formatters import _derive_message_id
 
 
 AGENT_TITLES = {
     "task_classifier": "Task Classifier",
     "planning_agent": "Planning Agent",
-    "approval_ack": "Planning Agent",
+    "approval_ack": "Approved — starting execution",
     "execute_agent": "Execute Agent",
     "execute_agent_free": "Execute Agent",
     "execute_agent_plan": "Execute Agent",
+    "execute_agent_followup": "Execute Agent",
+    "plan_init": "Execution Plan",
+    "plan_finalize": "Execution Plan",
     "summary_agent": "Summary Agent",
     "summary_agent_simple": "Summary Agent",
     "summary_agent_complex": "Summary Agent",
@@ -49,7 +45,21 @@ IGNORED_NODES = {
     "context_summary_simple",
     "context_summary_complex",
     "context_summary_meta",
+    "plan_init",
+    "plan_finalize",
 }
+
+# Nodes whose output is the deliverable rather than working narration. 
+# Rendered as a report card so the answer does not look like one more grey tool box.
+REPORT_NODES = {
+    "summary_agent",
+    "summary_agent_simple",
+    "summary_agent_complex",
+    "summary_agent_meta",
+}
+
+# The plan under review. Styled so the thing the user is being asked to approve is legible at a glance.
+PLAN_NODES = {"planning_agent"}
 TIMELINE_SNAPSHOT_VERSION = 1
 
 _MARKDOWN_IT_RENDERER = (
@@ -61,7 +71,6 @@ _MARKDOWN_IT_RENDERER = (
     else None
 )
 
-
 def reset_chat_messages(state: UIState) -> None:
     """Reset timeline-related structures."""
     state.messages = []
@@ -71,7 +80,6 @@ def reset_chat_messages(state: UIState) -> None:
     state.streaming_message_lookup = {}
     state.last_agent_block_id = None
     state.message_seq = 0
-
 
 def append_user_message(state: UIState, content: str) -> ChatMessage:
     """Append a user bubble to the Chatbot timeline."""
@@ -103,38 +111,6 @@ def rebuild_from_plain_messages(
             block["items"].append({"type": "message", "content": content})
             _refresh_block_message(state, block["block_id"])
     finalize_active_blocks(state)
-
-
-def rebuild_from_raw_messages(
-    state: UIState,
-    raw_messages: Iterable[Any],
-    *,
-    skip_texts: Optional[Set[str]] = None,
-) -> None:
-    """Recreate agent blocks from raw worker messages."""
-    reset_chat_messages(state)
-    for raw in raw_messages:
-        role = _get_role(raw)
-        if role in {"human", "user"}:
-            text = _coerce_text(getattr(raw, "content", None))
-            if text:
-                if skip_texts and text.strip() in skip_texts:
-                    continue
-                append_user_message(state, text)
-            msg_id = _derive_message_id(raw)
-            if msg_id:
-                state.processed_message_ids.add(msg_id)
-            continue
-        agent_name = getattr(raw, "name", None)
-        content_text = _coerce_text(getattr(raw, "content", None))
-        if skip_texts and content_text and content_text.strip() in skip_texts:
-            msg_id = _derive_message_id(raw)
-            if msg_id:
-                state.processed_message_ids.add(msg_id)
-            continue
-        _ingest_message(state, raw, agent_name=agent_name)
-    finalize_active_blocks(state)
-
 
 def export_timeline_snapshot(state: UIState) -> Dict[str, Any]:
     """Serialize the rendered UI timeline for persistence."""
@@ -202,13 +178,7 @@ def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> 
             if metadata.get("status") == "pending":
                 metadata["status"] = "done"
             block_id = metadata.get("id")
-            state.messages.append(
-                ChatMessage(
-                    role="assistant",
-                    content=str(entry.get("content", "")),
-                    metadata=metadata or None,
-                )
-            )
+            state.messages.append(ChatMessage(role="assistant", content=str(entry.get("content", "")), metadata=metadata or None,))
             if block_id:
                 state.message_lookup[str(block_id)] = len(state.messages) - 1
                 max_seq = max(max_seq, _extract_message_seq(block_id))
@@ -240,85 +210,30 @@ def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> 
     state.message_seq = max(max_seq, stored_seq if isinstance(stored_seq, int) else 0)
     return bool(entries)
 
-
 def process_chunk(state: UIState, chunk: Dict[str, Any]) -> bool:
     """Apply a LangGraph stream chunk. Returns True if timeline updated."""
     updated = False
     for agent_name, payload in chunk.items():
         if not isinstance(payload, dict):
             continue
-        if agent_name.lower() in IGNORED_NODES:
-            continue
         messages = payload.get("messages") or []
+        if agent_name.lower() in IGNORED_NODES:
+            _suppress_messages(state, messages)
+            continue
         for msg in messages:
             if _ingest_message(state, msg, agent_name=agent_name):
                 updated = True
     return updated
 
-
-def process_ai_message(state: UIState, agent_name: Optional[str], message: Any, tool_calls: Any) -> bool:
-    """Handle a completed AI message (no token streaming)."""
-    if not agent_name or agent_name.lower() in IGNORED_NODES or not message:
-        return False
-    agent_key = (agent_name or "assistant").lower()
-    message_id = _derive_message_id(message) or state.next_message_id(agent_key)
-    if message_id in state.processed_message_ids:
-        return False
-
-    block = _ensure_agent_block(state, agent_key)
-    updated = False
-
-    text = _coerce_text(getattr(message, "content", None))
-    primary_stream_key = str(message_id)
-    fallback_stream_key = f"{agent_key}:{block['block_id']}:stream"
-    stream_entry = state.streaming_message_lookup.get(primary_stream_key) or state.streaming_message_lookup.get(
-        fallback_stream_key
-    )
-    if stream_entry and primary_stream_key not in state.streaming_message_lookup:
-        state.streaming_message_lookup[primary_stream_key] = stream_entry
-        state.streaming_message_lookup.pop(fallback_stream_key, None)
-    if text:
-        if stream_entry and stream_entry.get("block_id") == block["block_id"]:
-            idx = stream_entry.get("item_index")
-            if idx is not None and idx < len(block["items"]):
-                block["items"][idx]["content"] = text
-            else:
-                block["items"].append({"type": "message", "content": text})
-                state.streaming_message_lookup[str(message_id)] = {
-                    "block_id": block["block_id"],
-                    "item_index": len(block["items"]) - 1,
-                }
-        else:
-            block["items"].append({"type": "message", "content": text})
-            state.streaming_message_lookup[str(message_id)] = {
-                "block_id": block["block_id"],
-                "item_index": len(block["items"]) - 1,
-            }
-        updated = True
-
-    call_list = tool_calls or getattr(message, "tool_calls", None) or []
-    for call in call_list:
-        updated |= _append_tool_call(state, block, call)
-
-    if updated:
-        _refresh_block_message(state, block["block_id"])
-    state.processed_message_ids.add(message_id)
-    return updated
-
-
-def process_tool_call_start(state: UIState, agent_name: Optional[str], tool_call: Any) -> bool:
-    """Render a tool call when it starts."""
-    if not agent_name or agent_name.lower() in IGNORED_NODES or not tool_call:
-        return False
-    return _ingest_tool_call_start(state, agent_name, tool_call)
-
-
-def process_tool_result(state: UIState, agent_name: Optional[str], call_id: Any, result: Any) -> bool:
-    """Render a tool result when it finishes."""
-    if not agent_name or agent_name.lower() in IGNORED_NODES or result is None:
-        return False
-    return _ingest_tool_result_event(state, agent_name, call_id, result)
-
+def _suppress_messages(state: UIState, messages: Any) -> None:
+    """Drop an ignored node's messages permanently."""
+    for msg in messages or []:
+        msg_id = _derive_message_id(msg)
+        if msg_id:
+            state.processed_message_ids.add(msg_id)
+        tool_call_id = getattr(msg, "tool_call_id", None)
+        if tool_call_id:
+            state.processed_tools_ids.add(tool_call_id)
 
 def _append_streaming_text(state: UIState, agent_name: str, chunk: Any) -> bool:
     agent_key = (agent_name or "assistant").lower()
@@ -338,18 +253,18 @@ def _append_streaming_text(state: UIState, agent_name: str, chunk: Any) -> bool:
         idx = stream_entry.get("item_index")
         if idx is not None and idx < len(block["items"]):
             block["items"][idx]["content"] += text
+            entry = stream_entry
         else:
             block["items"].append({"type": "message", "content": text})
-            state.streaming_message_lookup[lookup_key] = {
-                "block_id": block["block_id"],
-                "item_index": len(block["items"]) - 1,
-            }
+            entry = {"block_id": block["block_id"], "item_index": len(block["items"]) - 1}
+            state.streaming_message_lookup[lookup_key] = entry
     else:
         block["items"].append({"type": "message", "content": text})
-        state.streaming_message_lookup[lookup_key] = {
-            "block_id": block["block_id"],
-            "item_index": len(block["items"]) - 1,
-        }
+        entry = {"block_id": block["block_id"], "item_index": len(block["items"]) - 1}
+        state.streaming_message_lookup[lookup_key] = entry
+
+    # Also track the latest streamed item per block.
+    state.streaming_message_lookup[f"{agent_key}:{block['block_id']}:stream"] = entry
 
     _refresh_block_message(state, block["block_id"])
     return True
@@ -363,6 +278,8 @@ def _update_tool_call_item(block: Dict[str, Any], call: Any, *, call_id: Optiona
     if resolved_id is None:
         return False
     call_name = getattr(call, "name", None) or (call.get("name") if isinstance(call, dict) else "tool")
+    if call_name in tool_display.SUPPRESSED_TOOLS:
+        return False
     call_args = (
         getattr(call, "args", None)
         or (call.get("args") if isinstance(call, dict) else None)
@@ -370,25 +287,16 @@ def _update_tool_call_item(block: Dict[str, Any], call: Any, *, call_id: Optiona
         or (call.get("arguments") if isinstance(call, dict) else None)
     )
 
-    content, is_html = _format_tool_call_body(call_name, call_args)
-    call_key = str(resolved_id) if resolved_id is not None else None
+    call_key = str(resolved_id)
+    entry = tool_display.call_metadata(call_name, call_args)
 
-    if call_key:
-        for idx, item in enumerate(block["items"]):
-            if item.get("type") == "tool_call" and item.get("id") == call_key:
-                block["items"][idx]["content"] = content
-                block["items"][idx]["content_is_html"] = is_html
-                return True
+    for idx, item in enumerate(block["items"]):
+        if item.get("type") == "tool_call" and item.get("id") == call_key:
+            # A call can be seen twice (streamed chunk, then the committed message). Keep whatever the result already recorded.
+            item.update({k: v for k, v in entry.items() if k not in ("status", "note", "result_body")})
+            return True
 
-    block["items"].append(
-        {
-            "type": "tool_call",
-            "id": call_key,
-            "tool_name": call_name,
-            "content": content,
-            "content_is_html": is_html,
-        }
-    )
+    block["items"].append({"type": "tool_call", "id": call_key, "tool_name": call_name, **entry})
     return True
 
 
@@ -414,43 +322,56 @@ def _ingest_message(state: UIState, raw_msg: Any, agent_name: Optional[str]) -> 
 
 def _ingest_ai_message(state: UIState, raw_msg: Any, agent_name: Optional[str]) -> bool:
     agent_key = (agent_name or getattr(raw_msg, "name", None) or "assistant").lower()
-    message_id = _derive_message_id(raw_msg) or state.next_message_id(agent_key)
+    return _ingest_ai_content(state, raw_msg, agent_key=agent_key, tool_calls=None)
+
+
+def _ingest_ai_content(
+    state: UIState,
+    message: Any,
+    *,
+    agent_key: str,
+    tool_calls: Any,
+) -> bool:
+    """Render a completed AI message into its agent block.
+
+    Shared by the `ai_message` event path and the raw chunk path, which were
+    two copies of this logic that had to be kept in step by hand.
+    """
+    message_id = _derive_message_id(message) or state.next_message_id(agent_key)
     if message_id in state.processed_message_ids:
         return False
 
     block = _ensure_agent_block(state, agent_key)
     updated = False
 
-    text = _coerce_text(getattr(raw_msg, "content", None))
+    text = _coerce_text(getattr(message, "content", None))
     primary_stream_key = str(message_id)
     fallback_stream_key = f"{agent_key}:{block['block_id']}:stream"
-    stream_entry = state.streaming_message_lookup.get(primary_stream_key) or state.streaming_message_lookup.get(
-        fallback_stream_key
-    )
+    stream_entry = state.streaming_message_lookup.get(
+        primary_stream_key
+    ) or state.streaming_message_lookup.get(fallback_stream_key)
     if stream_entry and primary_stream_key not in state.streaming_message_lookup:
         state.streaming_message_lookup[primary_stream_key] = stream_entry
         state.streaming_message_lookup.pop(fallback_stream_key, None)
+
     if text:
-        if stream_entry and stream_entry.get("block_id") == block["block_id"]:
-            idx = stream_entry.get("item_index")
-            if idx is not None and idx < len(block["items"]):
-                block["items"][idx]["content"] = text
-            else:
-                block["items"].append({"type": "message", "content": text})
-                state.streaming_message_lookup[str(message_id)] = {
-                    "block_id": block["block_id"],
-                    "item_index": len(block["items"]) - 1,
-                }
+        streamed_index = (
+            stream_entry.get("item_index")
+            if stream_entry and stream_entry.get("block_id") == block["block_id"]
+            else None
+        )
+        if streamed_index is not None and streamed_index < len(block["items"]):
+            block["items"][streamed_index]["content"] = text
         else:
             block["items"].append({"type": "message", "content": text})
-            state.streaming_message_lookup[str(message_id)] = {
+            state.streaming_message_lookup[primary_stream_key] = {
                 "block_id": block["block_id"],
                 "item_index": len(block["items"]) - 1,
             }
         updated = True
 
-    tool_calls = getattr(raw_msg, "tool_calls", None) or []
-    for call in tool_calls:
+    call_list = tool_calls or getattr(message, "tool_calls", None) or []
+    for call in call_list:
         updated |= _append_tool_call(state, block, call)
 
     if updated:
@@ -495,89 +416,51 @@ def _ingest_tool_result_raw(state: UIState, raw_msg: Any) -> bool:
         state.processed_message_ids.add(msg_id)
         return False
 
-    tool_name = getattr(raw_msg, "name", "Tool Result")
-    content, is_html = _format_tool_result_content(getattr(raw_msg, "content", None), tool_name)
-    block["items"].append(
-        {
-            "type": "tool_result",
-            "tool_name": tool_name,
-            "content": content,
-            "content_is_html": is_html,
-        }
-    )
+    tool_name = getattr(raw_msg, "name", None) or "tool"
+    if tool_name in tool_display.SUPPRESSED_TOOLS:
+        state.processed_message_ids.add(msg_id)
+        if tool_call_id:
+            state.tool_call_block_lookup.pop(str(tool_call_id), None)
+            state.processed_tools_ids.add(tool_call_id)
+        return False
+
+    raw_content = getattr(raw_msg, "content", None)
+    status, note = tool_display.describe_result(tool_name, raw_content)
+    body = tool_display.render_result_body(tool_name, raw_content)
+
+    # Fold the outcome into the call it answers, so one action reads as one line instead of a "Tools Calling" box followed by a "Tools Result" box.
+    call_key = str(tool_call_id) if tool_call_id else None
+    merged = False
+    if call_key:
+        for item in block["items"]:
+            if item.get("type") == "tool_call" and item.get("id") == call_key:
+                item["status"] = status
+                item["note"] = note
+                item["result_body"] = body
+                merged = True
+                break
+
+    if not merged:
+        view = tool_display.describe_call(tool_name, None)
+        block["items"].append(
+            {
+                "type": "tool_call",
+                "id": call_key,
+                "tool_name": tool_name,
+                "icon": view.icon,
+                "label": view.label,
+                "status": status,
+                "note": note,
+                "call_body": "",
+                "result_body": body,
+            }
+        )
+
     if tool_call_id:
         state.tool_call_block_lookup.pop(str(tool_call_id), None)
         state.processed_tools_ids.add(tool_call_id)
     _refresh_block_message(state, block_id)
     state.processed_message_ids.add(msg_id)
-    return True
-
-
-def _ingest_tool_call_start(state: UIState, agent_name: str, tool_call: Any) -> bool:
-    agent_key = (agent_name or "assistant").lower()
-    call_id = getattr(tool_call, "id", None) or (tool_call.get("id") if isinstance(tool_call, dict) else None)
-    if not call_id:
-        return False
-    call_name = getattr(tool_call, "name", None) or (
-        tool_call.get("name") if isinstance(tool_call, dict) else None
-    )
-    if not call_name:
-        return False
-    block = _ensure_agent_block(state, agent_key)
-    updated = _update_tool_call_item(
-        block,
-        {
-            "id": call_id,
-            "name": call_name,
-            "args": getattr(tool_call, "args", None) or (
-                tool_call.get("args") if isinstance(tool_call, dict) else None
-            ),
-        },
-        call_id=call_id,
-    )
-    if updated:
-        state.tool_call_block_lookup[str(call_id)] = block["block_id"]
-        _refresh_block_message(state, block["block_id"])
-    return updated
-
-
-def _ingest_tool_result_event(state: UIState, agent_name: str, call_id: Any, result: Any) -> bool:
-    if not call_id:
-        return False
-    block_id = state.tool_call_block_lookup.get(str(call_id)) or state.last_agent_block_id
-    if not block_id:
-        return False
-    block = state.agent_blocks.get(block_id)
-    if not block:
-        return False
-
-    tool_name = getattr(result, "name", None) or (
-        result.get("name") if isinstance(result, dict) else "tool_result"
-    )
-    content, is_html = _format_tool_result_content(
-        getattr(result, "content", None) or (result.get("content") if isinstance(result, dict) else result),
-        tool_name,
-    )
-
-    replaced = False
-    for idx, item in enumerate(block["items"]):
-        if item.get("type") == "tool_result" and item.get("id") == str(call_id):
-            block["items"][idx]["content"] = content
-            block["items"][idx]["content_is_html"] = is_html
-            replaced = True
-            break
-    if not replaced:
-        block["items"].append(
-            {
-                "type": "tool_result",
-                "id": str(call_id),
-                "tool_name": tool_name,
-                "content": content,
-                "content_is_html": is_html,
-            }
-        )
-    _refresh_block_message(state, block_id)
-    state.tool_call_block_lookup.pop(str(call_id), None)
     return True
 
 
@@ -633,12 +516,33 @@ def _finalize_block(state: UIState, block_id: Optional[str], *, status: str = "d
 
 
 def finalize_active_blocks(state: UIState, *, status: str = "done") -> None:
-    """Mark the currently streaming agent block as finished.
-
-    Earlier blocks are finalized on each agent transition, so only the most
-    recent block can still carry a live spinner when a run ends.
-    """
+    """Mark the currently streaming agent block as finished."""
     _finalize_block(state, state.last_agent_block_id, status=status)
+
+
+def _append_card_block(
+    state: UIState,
+    *,
+    kind: str,
+    title: str,
+    message: str,
+    detail: Optional[str] = None,
+) -> bool:
+    """Append a standalone card (error or notice) and resolve any spinner."""
+    finalize_active_blocks(state)
+    block_id = state.next_message_id(kind)
+    metadata = {"title": title, "id": block_id, "status": "done"}
+    state.messages.append(ChatMessage(role="assistant", content="", metadata=metadata))
+    state.message_lookup[block_id] = len(state.messages) - 1
+    state.agent_blocks[block_id] = {
+        "agent_name": kind,
+        "block_id": block_id,
+        "items": [{"type": kind, "title": title, "message": message, "detail": detail}],
+    }
+    # Reset the active pointer so subsequent content opens a fresh agent block.
+    state.last_agent_block_id = None
+    _refresh_block_message(state, block_id)
+    return True
 
 
 def append_error_block(
@@ -649,21 +553,19 @@ def append_error_block(
     detail: Optional[str] = None,
 ) -> bool:
     """Append a styled error card to the timeline (and resolve any spinner)."""
-    finalize_active_blocks(state)
-    block_id = state.next_message_id("error")
-    metadata = {"title": title, "id": block_id, "status": "done"}
-    state.messages.append(ChatMessage(role="assistant", content="", metadata=metadata))
-    state.message_lookup[block_id] = len(state.messages) - 1
-    block = {
-        "agent_name": "error",
-        "block_id": block_id,
-        "items": [{"type": "error", "title": title, "message": message, "detail": detail}],
-    }
-    state.agent_blocks[block_id] = block
-    # Reset the active pointer so subsequent content opens a fresh agent block.
-    state.last_agent_block_id = None
-    _refresh_block_message(state, block_id)
-    return True
+    return _append_card_block(
+        state, kind="error", title=title, message=message, detail=detail
+    )
+
+
+def append_notice_block(
+    state: UIState,
+    message: str,
+    *,
+    title: str = "Notice",
+) -> bool:
+    """Append a neutral status card — a stopped run, not a failure."""
+    return _append_card_block(state, kind="notice", title=title, message=message)
 
 
 def _refresh_block_message(state: UIState, block_id: str) -> None:
@@ -673,125 +575,68 @@ def _refresh_block_message(state: UIState, block_id: str) -> None:
     idx = state.message_lookup.get(block_id)
     if idx is None or idx >= len(state.messages):
         return
-    if _block_uses_embedded_html(block["items"]):
-        state.messages[idx].content = gr.HTML(
-            value=_render_block_html(block["items"]),
-            container=False,
-        )
-    else:
-        state.messages[idx].content = _render_block_content(block["items"])
-
-
-def _block_uses_embedded_html(items: List[Dict[str, Any]]) -> bool:
-    return any(item.get("type") in {"tool_call", "tool_result", "error"} for item in items)
+    # Always HTML. Mixing markdown and HTML rendering meant a block's typography changed the moment it gained its first tool call.
+    state.messages[idx].content = gr.HTML(
+        value=_render_block_html(block["items"], agent_name=block.get("agent_name", "")),
+        container=False,
+    )
 
 
 def _restore_tool_lookup_for_block(state: UIState, block: Dict[str, Any]) -> None:
-    completed = {
-        str(item.get("id"))
-        for item in block["items"]
-        if item.get("type") == "tool_result" and item.get("id")
-    }
+    """Re-register calls that are still awaiting a result after a reload."""
     for item in block["items"]:
         if item.get("type") != "tool_call":
             continue
         call_id = item.get("id")
-        if not call_id:
-            continue
-        if str(call_id) in completed:
+        if not call_id or item.get("status") in ("ok", "error"):
             continue
         state.tool_call_block_lookup[str(call_id)] = block["block_id"]
 
 
-def _render_block_content(items: List[Dict[str, str]]) -> str:
-    sections: List[str] = []
-    for item in items:
-        if item["type"] == "message":
-            sections.append(item["content"])
-        elif item["type"] == "tool_call":
-            sections.append(
-                _render_tool_section(
-                    "Tools Calling",
-                    item["content"],
-                    item.get("tool_name"),
-                    body_is_html=item.get("content_is_html", False),
-                )
-            )
-        elif item["type"] == "tool_result":
-            sections.append(
-                _render_tool_section(
-                    "Tools Result",
-                    item["content"],
-                    item.get("tool_name"),
-                    body_is_html=item.get("content_is_html", False),
-                )
-            )
-    return "\n\n".join(sections).strip()
-
-
-def _render_block_html(items: List[Dict[str, Any]]) -> str:
+def _render_block_html(items: List[Dict[str, Any]], *, agent_name: str = "") -> str:
+    kind = "report" if agent_name in REPORT_NODES else (
+        "plan" if agent_name in PLAN_NODES else "activity"
+    )
     sections: List[str] = []
     for item in items:
         item_type = item.get("type")
         if item_type == "message":
             content = item.get("content", "")
             if content:
-                sections.append(_render_message_section_html(content))
+                sections.append(_render_message_section_html(content, kind=kind))
         elif item_type == "tool_call":
             sections.append(
-                _render_tool_section(
-                    "Tools Calling",
-                    item.get("content", ""),
-                    item.get("tool_name"),
-                    body_is_html=item.get("content_is_html", False),
-                )
-            )
-        elif item_type == "tool_result":
-            sections.append(
-                _render_tool_section(
-                    "Tools Result",
-                    item.get("content", ""),
-                    item.get("tool_name"),
-                    body_is_html=item.get("content_is_html", False),
+                tool_display.render_tool_entry(
+                    tool_display.ToolView(
+                        label=item.get("label") or item.get("tool_name") or "Tool call",
+                        icon=item.get("icon") or "•",
+                        status=item.get("status") or "running",
+                        note=item.get("note") or "",
+                    ),
+                    call_body=item.get("call_body", ""),
+                    result_body=item.get("result_body", ""),
                 )
             )
         elif item_type == "error":
             sections.append(
-                _render_error_card(
-                    item.get("title"),
-                    item.get("message"),
-                    item.get("detail"),
-                )
+                _render_error_card(item.get("title"), item.get("message"), item.get("detail"))
             )
-    return f"<div class='agent-block-content'>{''.join(sections)}</div>"
+        elif item_type == "notice":
+            sections.append(_render_notice_card(item.get("title"), item.get("message")))
+    return f"<div class='agent-block-content agent-block-content--{kind}'>{''.join(sections)}</div>"
 
 
-def _render_message_section_html(content: str) -> str:
+def _render_message_section_html(content: str, *, kind: str = "activity") -> str:
     stripped = content.strip()
     if not stripped:
         return ""
     if _MARKDOWN_IT_RENDERER is not None:
         body = _MARKDOWN_IT_RENDERER.render(stripped)
     elif _markdown_to_html is not None:
-        body = _markdown_to_html(
-            escape(stripped),
-            extensions=["extra", "nl2br", "sane_lists"],
-        )
+        body = _markdown_to_html(escape(stripped), extensions=["extra", "nl2br", "sane_lists"])
     else:
         body = f"<div class='agent-message-inline'>{escape(stripped)}</div>"
-    return f"<section class='agent-message-section'>{body}</section>"
-
-
-def _render_tool_section(title: str, body: str, tool_name: Optional[str], *, body_is_html: bool = False) -> str:
-    label = f"{title} · {tool_name}" if tool_name else title
-    escaped_label = escape(label)
-    body_markup = body if body_is_html else f"<pre>{escape(body)}</pre>"
-    return (
-        "<details class='tool-block'>"
-        f"<summary>{escaped_label}</summary>"
-        f"{body_markup}"
-        "</details>"
-    )
+    return f"<section class='agent-message-section agent-message-section--{kind}'>{body}</section>"
 
 
 def _render_error_card(title: Optional[str], message: Optional[str], detail: Optional[str] = None) -> str:
@@ -810,71 +655,13 @@ def _render_error_card(title: Optional[str], message: Optional[str], detail: Opt
     return "".join(parts)
 
 
-def _format_tool_call_body(tool_name: Optional[str], args: Any) -> Tuple[str, bool]:
-    if args is None:
-        return "", False
-    parsed_args = _parse_tool_args(args)
-    if tool_name == "python_executor":
-        code = _maybe_extract_python_code(parsed_args)
-        if code:
-            return _render_code_block(code, language="python"), True
-    if isinstance(parsed_args, (dict, list)):
-        return _render_code_block(json.dumps(parsed_args, indent=2), language="json"), True
-    return str(parsed_args), False
-
-
-def _format_tool_result_content(raw_content: Any, tool_name: Optional[str]) -> Tuple[str, bool]:
-    if raw_content is None:
-        return "", False
-    if tool_name == "python_executor":
-        code = _maybe_extract_code_from_result(raw_content)
-        if code:
-            return _render_code_block(code, language="python"), True
-    if tool_name == "read_files":
-        if isinstance(raw_content, (dict, list)):
-            return _render_code_block(json.dumps(raw_content, indent=2), language="text"), True
-        return _render_code_block(str(raw_content), language="text"), True
-    if isinstance(raw_content, (dict, list)):
-        return _render_code_block(json.dumps(raw_content, indent=2), language="json"), True
-    return str(raw_content), False
-
-
-def _parse_tool_args(call_args: Any) -> Any:
-    if isinstance(call_args, str):
-        try:
-            return json.loads(call_args)
-        except json.JSONDecodeError:
-            return call_args
-    return call_args
-
-
-def _maybe_extract_python_code(call_args: Any) -> str:
-    if isinstance(call_args, dict):
-        for key in ("code", "python_code", "script", "snippet"):
-            code = call_args.get(key)
-            if isinstance(code, str) and code.strip():
-                return code.rstrip("\n")
-    if isinstance(call_args, str) and call_args.strip():
-        return call_args.rstrip("\n")
-    return ""
-
-
-def _maybe_extract_code_from_result(raw_content: Any) -> str:
-    if isinstance(raw_content, dict):
-        for key in ("code", "python", "source"):
-            value = raw_content.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-    return ""
-
-
-def _render_code_block(content: str, *, language: str) -> str:
-    return (
-        "<div class='tool-code-block'>"
-        f"<div class='tool-code-label'>{escape(language.upper())}</div>"
-        f"<pre>{escape(content)}</pre>"
-        "</div>"
-    )
+def _render_notice_card(title: Optional[str], message: Optional[str]) -> str:
+    parts = ["<div class='agent-notice-card'>"]
+    parts.append(f"<div class='agent-notice-card__title'>{escape(str(title or 'Notice'))}</div>")
+    if message:
+        parts.append(f"<div class='agent-notice-card__message'>{escape(str(message))}</div>")
+    parts.append("</div>")
+    return "".join(parts)
 
 
 def _coerce_text(content: Any) -> str:
