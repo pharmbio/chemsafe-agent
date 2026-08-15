@@ -1,20 +1,9 @@
-"""Mode-pluggable ensemble SOP retriever (BM25 + dense).
-
-Pick the dense engine with `mode`:
-
-    EnsembleSOPRetriever(mode="basic")          # MultiVectorRetriever
-    EnsembleSOPRetriever(mode="parent_child")   # ParentDocumentRetriever
-                                                # (text-embedding-3-large, c400/o50)
-
-Both modes return parent documents and dedupe across BM25/dense via the
-shared `doc_id` metadata key.
-"""
-
 from __future__ import annotations
 
 import json
 import os
 import pickle
+import threading
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Dict, List, Tuple
@@ -145,6 +134,36 @@ class _IdInjectingDocstore(BaseStore[str, Document]):
 
     def yield_keys(self, *, prefix: str | None = None):
         return self._inner.yield_keys(prefix=prefix)
+
+
+_retriever_cache: Dict[Tuple, "EnsembleSOPRetriever"] = {}
+_retriever_cache_lock = threading.Lock()
+
+
+def get_sop_retriever(**kwargs) -> "EnsembleSOPRetriever":
+    """Return a cached retriever for this configuration, building it once.
+
+    Constructing one unpickles the whole BM25 corpus, rebuilds the BM25 index
+    from documents and reopens Chroma. The prompts ask for SOP grounding on
+    essentially every safety-relevant step, so paying that per query dominated
+    run latency.
+    """
+    key = tuple(sorted((name, value) for name, value in kwargs.items()))
+    retriever = _retriever_cache.get(key)
+    if retriever is not None:
+        return retriever
+    with _retriever_cache_lock:
+        retriever = _retriever_cache.get(key)
+        if retriever is None:
+            retriever = EnsembleSOPRetriever(**kwargs)
+            _retriever_cache[key] = retriever
+        return retriever
+
+
+def clear_sop_retriever_cache() -> None:
+    """Drop cached retrievers, e.g. after rebuilding the indexes on disk."""
+    with _retriever_cache_lock:
+        _retriever_cache.clear()
 
 
 class EnsembleSOPRetriever:
