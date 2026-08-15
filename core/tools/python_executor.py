@@ -6,12 +6,24 @@ from pathlib import Path
 
 from langchain.tools import tool
 
-from app.config import DATA_ROOT, MEMORY_ROOT, REPO_ROOT, RESULTS_ROOT
+from app.config import (
+    DATA_ROOT,
+    FIGURE_AUTOSAVE,
+    MEMORY_ROOT,
+    PYTHON_EXEC_TIMEOUT_SECONDS,
+    PYTHON_OUTPUT_MAX_CHARS,
+    PYTHON_SESSION_CACHE_SIZE,
+    REPO_ROOT,
+    RESULTS_ROOT,
+)
+from backend.utils import figure_capture
 from backend.utils.local_python_executor import (
     BASE_BUILTIN_MODULES,
+    ExecutionTimeout,
     InterpreterError,
     local_python_executor,
     reset_executor_state,
+    set_max_executor_sessions,
 )
 from backend.utils.output_paths import (
     conversation_output_root,
@@ -27,6 +39,44 @@ from backend.utils.storage_paths import thread_data_root
 # Makes every skill's helper modules importable as `scripts.<module>`, so a
 # SKILL.md can reference its own scripts by short path.
 register_skill_scripts()
+set_max_executor_sessions(PYTHON_SESSION_CACHE_SIZE)
+if FIGURE_AUTOSAVE:
+    figure_capture.install()
+
+
+def _session_key() -> str:
+    """Interpreter namespace identity: one per user and conversation."""
+    user_id = get_current_user_id() or "anonymous-user"
+    conversation_id = get_current_conversation_id() or "default-thread"
+    return f"{user_id}::{conversation_id}"
+
+
+def _bound_output(result):
+    """Keep a single tool result from dominating the transcript.
+
+    Whatever is returned here is replayed to the model on every subsequent call
+    in the run, so the middle of an oversized dump is dropped rather than the
+    tail, which usually holds the answer.
+    """
+    if isinstance(result, str):
+        text = result
+    elif isinstance(result, (dict, list, tuple, set)):
+        return result
+    else:
+        text = str(result) if result is not None else None
+    if text is None or len(text) <= PYTHON_OUTPUT_MAX_CHARS:
+        return result
+    head = int(PYTHON_OUTPUT_MAX_CHARS * 0.6)
+    tail = PYTHON_OUTPUT_MAX_CHARS - head
+    omitted = len(text) - head - tail
+    return (
+        f"{text[:head]}\n\n"
+        f"... [{omitted:,} characters omitted from the middle of this output. "
+        "Re-run with narrower selection, aggregation or slicing if you need the "
+        "omitted part, or write the full result to a file under the output "
+        "scope and read it back in pieces.] ...\n\n"
+        f"{text[-tail:]}"
+    )
 
 DEFAULT_AUTHORIZED_IMPORTS = [
     'app',
@@ -216,12 +266,34 @@ def python_executor(code: str):
     Returns:
         The result of the execution.
     """
+    session_key = _session_key()
+    context = _build_python_execution_context()
+    before_figures = figure_capture.snapshot_open_figures() if FIGURE_AUTOSAVE else ()
+
     try:
-        return local_python_executor(
+        result = local_python_executor(
             code,
             authorized_imports,
-            variables=_build_python_execution_context(),
+            variables=context,
+            session_key=session_key,
+            timeout=PYTHON_EXEC_TIMEOUT_SECONDS or None,
         )
+    except ExecutionTimeout as exc:
+        figure_capture.forget_session(session_key)
+        return {
+            "ok": False,
+            "error_type": "ExecutionTimeout",
+            "error": str(exc),
+            "input_code": code,
+            "recovery": (
+                "The Python session was reset, so variables from before the "
+                "timeout are gone. Split the work into smaller calls, narrow the "
+                "query (for example a summary endpoint instead of a full "
+                "traversal), pass an explicit timeout to network calls, and "
+                "persist intermediate results to files under the output scope so "
+                "progress survives."
+            ),
+        }
     except InterpreterError as exc:
         return {
             "ok": False,
@@ -231,17 +303,39 @@ def python_executor(code: str):
             "authorized_imports": authorized_imports,
         }
 
+    if FIGURE_AUTOSAVE:
+        saved = figure_capture.capture_unsaved_figures(
+            session_key=session_key,
+            before=before_figures,
+            prepare_output_path=context["prepare_output_path"],
+        )
+        if saved:
+            listing = "\n".join(f"- {path}" for path in saved)
+            note = (
+                "\n\n[figures] These figures were still unsaved, so they were "
+                f"written to the output scope for you:\n{listing}\n"
+                "Reference these paths, or call savefig yourself to control the "
+                "filename and format."
+            )
+            result = (result if isinstance(result, str) else str(result or "")) + note
+
+    return _bound_output(result)
+
 
 @tool
 def reset_python_state():
     """Reset the Python execution state.
-    
+
     This clears all variables and functions defined in previous executions,
     providing a clean slate for new code execution. Use this when you need
     to start fresh or clear accumulated state.
-    
+
+    Only the active conversation's interpreter is affected.
+
     Returns:
         str: Confirmation message.
     """
-    reset_executor_state()
+    session_key = _session_key()
+    reset_executor_state(session_key)
+    figure_capture.forget_session(session_key)
     return "Python execution state has been reset. All previous variables and functions have been cleared."
