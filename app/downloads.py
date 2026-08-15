@@ -1,14 +1,3 @@
-"""Signed, expiring download links for user- and thread-scoped files.
-
-A download link carries an HMAC-signed payload naming the file, the thread and
-the session that asked for it. Serving the file re-checks all three: the
-signature proves the link was issued by this app, `restore_session` proves the
-caller still holds the session it was issued to, and the path must resolve
-inside that thread's own data or output directory. A stolen link is therefore
-useless without the session it was minted for, and expires in ten minutes
-regardless.
-"""
-
 from __future__ import annotations
 
 import base64

@@ -1,9 +1,3 @@
-"""Sign-in, conversation selection, and file management handlers.
-
-Everything here is about *which* conversation the user is looking at and what
-belongs to it. Actually running the agent lives in `app.run_controller`.
-"""
-
 from __future__ import annotations
 
 import json

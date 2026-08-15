@@ -1,13 +1,3 @@
-"""Application entry point: mount the Gradio UI on FastAPI and serve it.
-
-The pieces live next door:
-  * `app.ui.layout`          — the widget tree and its event wiring
-  * `app.ui.projection`      — UIState to component updates
-  * `app.run_controller`     — driving one agent run
-  * `app.session`            — sign-in, conversation selection, files
-  * `app.downloads`          — signed download links
-"""
-
 from __future__ import annotations
 
 import inspect

@@ -1,11 +1,3 @@
-"""Uploads and produced artifacts for a conversation.
-
-Two directories back every thread: uploads under `DATA_ROOT/<user>/<thread>/`
-and agent output under `RESULTS_ROOT/<user>/<thread>/`. The sidebar shows them
-as one list, newest first, because to the user they are simply "the files in
-this conversation".
-"""
-
 from __future__ import annotations
 
 import hashlib

@@ -1,11 +1,3 @@
-"""Persistence for the rendered conversation timeline.
-
-The timeline is a *rendered* view — agent blocks, tool calls, tool results —
-kept alongside the LangGraph checkpoint rather than derived from it, because
-the graph's message list does not record how the UI grouped those messages
-into blocks. It is what a returning user sees before the graph is ever touched.
-"""
-
 from __future__ import annotations
 
 import time

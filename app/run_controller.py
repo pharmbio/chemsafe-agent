@@ -1,16 +1,3 @@
-"""Driving one agent run and reflecting it in the UI.
-
-A run is streamed from LangGraph, translated into timeline updates, and yielded
-back to Gradio as it progresses. Three things make this more than a loop:
-
-* the user may switch to another conversation mid-run, and the run must keep
-  going and keep recording — into a detached buffer rather than into the
-  session state they can now see;
-* the run may pause for plan approval, which is a state the UI has to announce
-  rather than a state it can hide;
-* the user may stop the run, which has to leave a visible, resumable result.
-"""
-
 from __future__ import annotations
 
 import asyncio
