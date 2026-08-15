@@ -1,9 +1,8 @@
-"""Utilities for user- and conversation-scoped output directories."""
-
 from __future__ import annotations
 
 import contextvars
 import shutil
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -189,3 +188,65 @@ def describe_output_scope(
         "Write all generated files under this directory or its subdirectories only.\n"
         "In python_executor, use the injected output helpers tied to this scope."
     )
+
+
+_ARTIFACT_CACHE_TTL_SECONDS = 2.0
+_artifact_cache: dict[tuple, tuple[float, str]] = {}
+
+
+def describe_output_artifacts(
+    *,
+    user_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    max_items: int = 25,
+) -> str:
+    """List the files this conversation has already produced, newest first.
+
+    Read from disk rather than from a model-maintained list, so a follow-up turn
+    can refer to earlier artifacts even when the narrative summary lost them.
+    Returns an empty string when nothing has been produced yet.
+
+    Briefly cached: this runs before every model call, and a run that writes
+    many files would otherwise re-walk and re-stat the whole output tree each
+    time. The TTL is short enough that a file written mid-run still shows up.
+    """
+    resolved_user_id = user_id or get_current_user_id() or "anonymous-user"
+    resolved_conversation_id = conversation_id or get_current_conversation_id() or "default-thread"
+
+    cache_key = (resolved_user_id, resolved_conversation_id, max_items)
+    cached = _artifact_cache.get(cache_key)
+    now = time.monotonic()
+    if cached is not None and now - cached[0] < _ARTIFACT_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        root = conversation_output_root(resolved_conversation_id, user_id=resolved_user_id)
+        entries = [path for path in root.rglob("*") if path.is_file()]
+    except OSError:
+        _artifact_cache[cache_key] = (now, "")
+        return ""
+    if not entries:
+        _artifact_cache[cache_key] = (now, "")
+        return ""
+
+    def _sort_key(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    entries.sort(key=_sort_key, reverse=True)
+    truncated = len(entries) - max_items
+    lines = []
+    for path in entries[:max_items]:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        lines.append(f"- {path} ({size:,} bytes)")
+    if truncated > 0:
+        lines.append(f"- ... and {truncated} more file(s) in this output scope")
+
+    rendered = "\n".join(lines)
+    _artifact_cache[cache_key] = (now, rendered)
+    return rendered

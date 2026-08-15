@@ -1,22 +1,3 @@
-"""Skill-relative short paths.
-
-Skills live in ``skills/<name>/`` and carry two kinds of companion files:
-``references/*.md`` (read with ``read_files``) and ``scripts/*.py`` (imported in
-``python_executor``). A SKILL.md refers to its own companions by short path —
-``references/pubchem.md``, ``from scripts.pubchem import ...`` — instead of
-repeating its own directory, so skill folders stay portable.
-
-Two helpers back that:
-
-* ``find_skill_files`` resolves a short doc path against every skill directory.
-* ``register_skill_scripts`` exposes all ``skills/*/scripts/`` directories as one
-  ``scripts`` namespace package.
-
-Because ``scripts`` is a single flat namespace, module names must be unique
-across skills; ``register_skill_scripts`` fails loudly rather than let one skill
-silently shadow another.
-"""
-
 from __future__ import annotations
 
 import sys
