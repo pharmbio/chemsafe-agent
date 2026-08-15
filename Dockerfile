@@ -1,5 +1,5 @@
 # ChemSafeAgent Docker Container
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -46,6 +46,7 @@ RUN mkdir -p ${PERSIST_ROOT}
 # Copy requirements first for better caching
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --pre deepchem==2.8.1.dev20260220202610
 
 # Pre-fetch Chroma default embedding model to avoid runtime download delays
 RUN python - <<'PY'
