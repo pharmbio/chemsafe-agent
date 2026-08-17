@@ -8,7 +8,8 @@ EXECUTE_SKILLS = [
     "literature_search",
     "woe_reasoning",
     "cheminformatics",
-    "qprf-generator"
+    "similarity_search",
+    "qprf_generating",
 ]
 EXECUTE_SKILLS_BLOCK = format_skill_summaries(EXECUTE_SKILLS)
 
