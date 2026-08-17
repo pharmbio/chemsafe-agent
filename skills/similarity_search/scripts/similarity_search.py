@@ -7,8 +7,6 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
-from backend.utils.output_paths import task_file_path
-
 
 DB_DIR = Path(__file__).resolve().parent
 FP_MATRIX_PATH = DB_DIR / "db_matrix.npy"
@@ -20,14 +18,25 @@ fp_generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 _DATABASE = None
 
 
-def search(query_smiles, db, db_pop, meta, k=10, chunk=256, output_name="similarity_hits.csv"):
+def search(query_smiles, db, db_pop, meta, k=10, chunk=256, output_name=None):
     """Tanimoto search against the fingerprint matrix.
 
-    db      : (N, 2048) uint16 matrix
-    db_pop  : (N,) bit counts of db
-    writes  : long-format CSV in the conversation output scope, top-k hits per query
-    returns : a message naming the file, plus any SMILES that could not be parsed
+    db          : (N, 2048) uint16 matrix
+    db_pop      : (N,) bit counts of db
+    output_name : absolute path from `prepare_output_path(...)` — see similarity_search
+    writes      : long-format CSV, top-k hits per query
+    returns     : a message naming the file, plus any SMILES that could not be parsed
     """
+
+    # The scope has to be handed in: contextvars set by the caller do not reach
+    # the interpreter's worker thread, so resolving it here would silently write
+    # to anonymous-user/default-thread instead of this conversation.
+    output_path = Path(output_name) if output_name else None
+    if output_path is None or not output_path.is_absolute():
+        raise ValueError(
+            f"output_name must be an absolute path, got {output_name!r}. Call "
+            'similarity_search(..., output_name=prepare_output_path("similarity_hits.csv")).'
+        )
 
     # validate SMILES
     valid_smiles = []
@@ -63,8 +72,7 @@ def search(query_smiles, db, db_pop, meta, k=10, chunk=256, output_name="similar
             rows.append(hits)
 
     results_df = pd.concat(rows, ignore_index=True)
-    # Scoped to the active conversation via contextvars, like prepare_output_path.
-    output_path = task_file_path(output_name)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     results_df.to_csv(output_path, index=False)
 
     message = f"The results is available at {output_path}."
@@ -73,7 +81,17 @@ def search(query_smiles, db, db_pop, meta, k=10, chunk=256, output_name="similar
     return message
 
 
-def similarity_search(query_smiles: list, k=10, output_name="similarity_hits.csv"):
+def similarity_search(query_smiles: list, k=10, output_name=None):
+    """Search a list of SMILES against the ECHA registered-substance database.
+
+    Writes the top-k hits per query to `output_name`, which must be an absolute
+    path from the scoped `prepare_output_path(...)` helper, and returns a message
+    naming that file — the hit table is in the CSV, so read it back with pandas
+    rather than expecting rows here. No similarity cut-off and no self-hit
+    filter: take a generous `k` and narrow the CSV.
+
+        similarity_search(["CCO"], k=20, output_name=prepare_output_path("hits.csv"))
+    """
     global _DATABASE
 
     if isinstance(query_smiles, str):

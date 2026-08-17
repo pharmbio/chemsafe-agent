@@ -12,22 +12,40 @@ analogue.
 
 ## Helper
 
+One entry point, and this is its whole signature:
+
 ```python
 from scripts.similarity_search import similarity_search
 
-similarity_search(["CC(=O)Oc1ccccc1C(=O)O"], k=20, output_name="aspirin_analogues.csv")
+similarity_search(query_smiles, k=10, output_name=prepare_output_path("similarity_hits.csv"))  # -> str
 ```
 
-`similarity_search(query_smiles, k=10, output_name="similarity_hits.csv")` takes a list of SMILES (a
-bare string is accepted) and **writes a CSV, returning only its path** plus any SMILES that could not
-be parsed. The file is long-format — one row per (query, hit) — with `query_smiles`, `rank`,
-`similarity`, `Name`, `EC Number`, `CAS Number`, overview link, `Canonical_SMILES`,
-`Isomeric_SMILES`. Name the file after the query when running more than one search, or the second
-call overwrites the first.
+- `query_smiles` — a **list of SMILES**.
+- `k` — hits per query. There is no similarity cut-off and no self-hit filter, so take a generous `k`
+  and narrow the CSV afterwards.
+- `output_name` — **must** be `prepare_output_path("<name>.csv")`; a bare filename raises. That
+  helper is what scopes the file to this conversation. Name it after the query when running more than
+  one search, or the second call overwrites the first.
 
-The hit table never comes back through the return value. Read what you need from the CSV with pandas
-in the same `python_executor` session — filter by `similarity`, then carry only the rows you will
-actually cite into the report.
+It returns **only a message naming the file** — `"The results is available at <path>."`, followed by
+`"Skipping [...] due to invalid."` when a SMILES could not be parsed. The hits themselves are in the
+CSV, long-format, one row per (query, hit): `query_smiles`, `rank`, `similarity`, `Name`,
+`EC Number`, `CAS Number`, overview link, `SMILES_Source`, `Canonical_SMILES`, `Isomeric_SMILES`.
+
+Read what you need back with pandas in the same `python_executor` session, filter there, and carry
+only the rows you will actually cite into the report:
+
+```python
+import pandas as pd
+csv_path = prepare_output_path("aspirin_analogues.csv")
+print(similarity_search(["CC(=O)Oc1ccccc1C(=O)O"], k=50, output_name=csv_path))
+hits = pd.read_csv(csv_path)
+hits = hits[(hits.similarity >= 0.7) & (hits.similarity < 1.0)]   # cut-off + drop the query itself
+```
+
+Do not introspect the helper: `inspect` is **not** an authorized import and importing it aborts the
+whole cell. The signature above is complete; if you need more,
+`read_files("similarity_search/scripts/similarity_search.py")`.
 
 ## What the index is
 
