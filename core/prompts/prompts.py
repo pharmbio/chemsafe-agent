@@ -207,11 +207,7 @@ Return a polished markdown report using this structure:
 - Include relevant files, tool outputs, Python execution results, SOPs, skill files, or repository artifacts when applicable.
 - For each item, explain briefly how it supports the answer.
 
-## Changes Made
-- List files changed, if any, and state what changed in outcome terms.
-- If no files were changed, say so explicitly.
-
-## Open Issues
+## Open Issues (optional, depends on context)
 - List uncertainties, blockers, missing evidence, or follow-up items that materially affect the answer.
 - If there are no open issues, say `None`.
 
