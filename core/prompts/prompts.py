@@ -1,6 +1,5 @@
 from backend.utils.skills_format import format_skill_summaries
 
-
 EXECUTE_SKILLS = [
     "data_inspection",
     "database_traversal",
@@ -8,7 +7,8 @@ EXECUTE_SKILLS = [
     "sop_search",
     "literature_search",
     "woe_reasoning",
-    "cheminformatics"
+    "cheminformatics",
+    "qprf-generator"
 ]
 EXECUTE_SKILLS_BLOCK = format_skill_summaries(EXECUTE_SKILLS)
 
