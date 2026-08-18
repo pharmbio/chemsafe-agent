@@ -28,9 +28,7 @@ def search(query_smiles, db, db_pop, meta, k=10, chunk=256, output_name=None):
     returns     : a message naming the file, plus any SMILES that could not be parsed
     """
 
-    # The scope has to be handed in: contextvars set by the caller do not reach
-    # the interpreter's worker thread, so resolving it here would silently write
-    # to anonymous-user/default-thread instead of this conversation.
+    # HANDLE OUTPUT_PATH
     output_path = Path(output_name) if output_name else None
     if output_path is None or not output_path.is_absolute():
         raise ValueError(
