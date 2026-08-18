@@ -22,22 +22,14 @@ from scripts.cheminformatics import (
     standardize_smiles,
 )
 
-# --- admet-ai (optional, highly recommended) ---------------------------------
+# admet-ai (optional, highly recommended)
 try:
     from admet_ai import ADMETModel
     ADMET_AI_OK = True
 except ImportError:
     ADMET_AI_OK = False
 
-# --- DeepChem (optional) -----------------------------------------------------
-# DeepChem's feat package imports ``dgl`` unconditionally (in
-# ``deepvariant_featurizer``) but only guards ``ImportError``. With recent torch
-# (e.g. 2.11) the bundled DGL ships no matching ``graphbolt`` build and raises a
-# ``FileNotFoundError`` (an OSError, not ImportError) at import time, which
-# escapes that guard and breaks ``import deepchem`` entirely. The GraphConv /
-# Tox21 path below never touches DGL, so if real DGL is unavailable we shield the
-# import with a stub module. We try the real package first so environments that
-# do have a working DGL keep it.
+# DeepChem (optional)
 try:
     import dgl  # noqa: F401
 except Exception:  # FileNotFoundError, ImportError, OSError, ...
@@ -73,10 +65,8 @@ _GRAPH_CONV_LAYERS = [64, 64]
 _NUMBER_INPUT_FEATURES = [75, 64]
 
 
-# =============================================================================
-# Drug-likeness rules (Lipinski / Veber / Egan / Ghose)
-# =============================================================================
 
+# Drug-likeness rules (Lipinski / Veber / Egan / Ghose)
 def calc_drug_likeness(descriptors: dict) -> dict:
     """Return Lipinski / Veber / Egan / Ghose pass-fail flags from a
     descriptor dict produced by ``compute_descriptors``.
@@ -104,10 +94,9 @@ def calc_drug_likeness(descriptors: dict) -> dict:
     }
 
 
-# =============================================================================
+
 # ADMET-AI (pre-trained Chemprop/MPNN on TDC datasets)
 # Reference: Swanson et al. 2023 — github.com/swansonk14/admet_ai
-# =============================================================================
 
 _admet_singleton: Optional[object] = None
 
@@ -191,11 +180,9 @@ def calc_admet(canonical_smiles: str) -> dict:
         return {"status": "error", "error": str(e)}
 
 
-# =============================================================================
 # Tox21 (DeepChem GraphConv — trained once, cached to disk)
 # 12 regulatory endpoints. First run: downloads ~10 MB, trains ~5 min CPU,
 # caches to ~/.cache/chemical_safety_calc/tox21_graphconv/.
-# =============================================================================
 
 _tox21_cache: Optional[tuple] = None  # (model, transformers)
 
@@ -282,18 +269,15 @@ def calc_tox21(canonical_smiles: str) -> dict:
         return {"status": "error", "error": str(e)}
 
 
-# =============================================================================
+
 # Ecotoxicology (baseline-narcosis QSARs)
-#
 # References:
 #   Fish (Fathead minnow, 96h LC50):  Veith et al. 1983
 #   Daphnia magna (48h EC50):          Cronin & Dearden 1995
 #   Green algae (72h EC50):            Netzeva et al. 2005 (simplified)
 #   BCF (bioconcentration):            Meylan et al. 1999
-#
 # Applicability domain: non-ionic organics, logP ~0-7, MW ~50-500.
 # Reactive, electrophilic, or ionisable compounds may deviate >1 log unit.
-# =============================================================================
 
 def calc_ecotoxicology(descriptors: dict) -> dict:
     """Baseline-narcosis QSAR estimates for fish, daphnia, algae, and BCF."""
@@ -358,11 +342,10 @@ def calc_ecotoxicology(descriptors: dict) -> dict:
     }
 
 
-# =============================================================================
+
 # Melting point (empirical QSAR)
 # Reference: Karthikeyan et al. 2005, J. Chem. Inf. Model. 45:581-590
 # Typical uncertainty: +/-40-60 C. Salts and polymorphs deviate more.
-# =============================================================================
 
 def calc_melting_point(descriptors: dict) -> dict:
     mw    = descriptors["mw"]
@@ -391,11 +374,9 @@ def calc_melting_point(descriptors: dict) -> dict:
     }
 
 
-# =============================================================================
 # Explosivity (SMARTS + oxygen balance)
 # Rule-based only — formal GHS classification requires physical testing
 # (UN gap test, BAM drop-weight test).
-# =============================================================================
 
 _EXPLOSIVE_SMARTS = {
     "nitro":              "[N+](=O)[O-]",
@@ -455,15 +436,8 @@ def calc_explosivity(mol) -> dict:
     }
 
 
-# =============================================================================
+
 # Draft GHS rollup
-#
-# SCREENING ONLY. This function emits a rule-based GHS hazard summary derived
-# from the predicted (ML/QSAR) inputs above. It is intended for triage, not
-# for an authoritative classification call — that integration is the job of
-# the woe_reasoning skill, which combines this with experimental + read-across
-# evidence and applicability-domain status.
-# =============================================================================
 
 def classify_ghs(descriptors: dict, admet: dict, eco: dict, expl: dict) -> dict:
     """Draft GHS rollup (screening output, not authoritative).
@@ -567,10 +541,8 @@ def classify_ghs(descriptors: dict, admet: dict, eco: dict, expl: dict) -> dict:
     }
 
 
-# =============================================================================
-# Full-profile orchestrator
-# =============================================================================
 
+# Full-profile orchestrator
 def calculate_chemical_safety(smiles: str) -> dict:
     """Compute a full chemical safety and toxicological profile from a SMILES.
 
