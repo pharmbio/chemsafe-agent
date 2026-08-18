@@ -11,9 +11,7 @@ from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
 
-# ---------------------------------------------------------------------------
 # Standardization
-# ---------------------------------------------------------------------------
 
 _SALT_REMOVER = SaltRemover()
 _UNCHARGER = rdMolStandardize.Uncharger()
@@ -151,9 +149,7 @@ def murcko_scaffold_smiles(mol_or_smiles) -> Optional[str]:
     return Chem.MolToSmiles(scaffold) if scaffold is not None else None
 
 
-# ---------------------------------------------------------------------------
 # Descriptors
-# ---------------------------------------------------------------------------
 
 _CORE_DESCRIPTORS = {
     "molecular_formula": lambda m: rdMolDescriptors.CalcMolFormula(m),
@@ -199,9 +195,7 @@ def lipinski_flags(descriptors: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Structural alerts via RDKit FilterCatalog
-# ---------------------------------------------------------------------------
 
 _BUILTIN_CATALOGS = {
     "pains": FilterCatalogParams.FilterCatalogs.PAINS,
@@ -266,9 +260,7 @@ def match_custom_smarts(mol_or_smiles, smarts: str) -> bool:
     return mol.HasSubstructMatch(pattern)
 
 
-# ---------------------------------------------------------------------------
 # Fingerprints, similarity, read-across
-# ---------------------------------------------------------------------------
 
 def morgan_fingerprint(mol_or_smiles, *, radius: int = 2, n_bits: int = 2048):
     """Return a Morgan (ECFP-like) fingerprint as an ExplicitBitVect.
@@ -326,9 +318,7 @@ def maximum_common_substructure(smiles_list: Sequence[str]) -> Optional[str]:
     return result.smartsString if result and result.numAtoms > 0 else None
 
 
-# ---------------------------------------------------------------------------
 # Applicability domain (for QSAR reliance, OECD Principle 3)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class AppDomainReport:
@@ -402,10 +392,7 @@ def applicability_domain_check(
     )
 
 
-# ---------------------------------------------------------------------------
 # Visualization helper
-# ---------------------------------------------------------------------------
-
 def draw_molecules(
     smiles_list: Sequence[str],
     *,
