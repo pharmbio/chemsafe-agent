@@ -88,8 +88,8 @@ MODE_PATHS = {
 # EnsembleRetriever weights (sparse BM25 + dense Chroma) and BM25 hyperparams.
 # rank_bm25 defaults: k1=1.5, b=0.75.
 ENSEMBLE_CONFIG = {
-    "bm25_weight": 0.5,
-    "dense_weight": 0.5,
+    "bm25_weight": 0.4,
+    "dense_weight": 0.6,
     "bm25_k1": 1.5,
     "bm25_b": 0.75,
     "rrf_c": 60,
