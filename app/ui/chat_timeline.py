@@ -22,6 +22,9 @@ AGENT_TITLES = {
     "execute_agent_free": "Execute Agent",
     "execute_agent_plan": "Execute Agent",
     "execute_agent_followup": "Execute Agent",
+    "critic_gate": "Criticise",
+    "critic_agent": "Critics Agent",
+    "critic_review": "Criticise",
     "plan_init": "Execution Plan",
     "plan_finalize": "Execution Plan",
     "summary_agent": "Summary Agent",
@@ -47,6 +50,14 @@ IGNORED_NODES = {
     "context_summary_meta",
     "plan_init",
     "plan_finalize",
+    # The gate's message is the brief handed to the critic, not something the
+    # user needs; the review's own verdict says the same thing in the reader's
+    # terms. Only the shared-transcript critic produces one at all — a step-wise
+    # review carries its brief inside its case file. Suppressing it still
+    # records its id, because a message merely skipped here can arrive again
+    # from a node that re-emits what it was given, under a name that is not
+    # ignored.
+    "critic_gate",
 }
 
 # Nodes whose output is the deliverable rather than working narration. 
