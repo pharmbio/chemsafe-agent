@@ -18,6 +18,8 @@ from app.config import (
     CONTEXT_ARTIFACT_MAX_ITEMS,
     CONTEXT_GOAL_MAX_CHARS,
     CONTEXT_KEEP_TURNS,
+    CRITIC_FINDING_MAX_CHARS,
+    CRITIC_FINDINGS_MAX,
     MEMORY_MAX_ITEMS,
     MEMORY_OUTPUTS_MAX_ITEMS,
     SUMMARY_MAX_MESSAGES,
@@ -64,6 +66,78 @@ class AgentGraphState(AgentState, total=False):
     plan_path: str
     plan_run_id: int
     plan_progress: str
+    # Critic review. Open blocking findings the executor still has to act on.
+    #
+    # How they *reach* the executor differs by mode. In `full_run` they are
+    # pinned like `approval_constraints`, so remediation instructions survive
+    # compression while the executor works through them. In `stepwise` they are
+    # delivered as the review handoff message instead — there is exactly one in
+    # the transcript at a time and it is removed once the step it concerns is
+    # settled — and this list is kept only so the loop routers and the next
+    # review's case file can read what is open. Cleared by `plan_init` and on an
+    # accepted verdict, so a later turn never re-executes against a finding that
+    # was already addressed.
+    critic_findings: List[str]
+    # Findings no execution pass will resolve: advisory notes, and blocking ones
+    # whose step ran out of revision budget. They are not instructions, so they
+    # are never sent back to the executor — but the report has to carry them
+    # into Open Issues, and in step-wise mode the verdict message that raised
+    # them is removed from the transcript, so state is the only thing that
+    # remembers.
+    critic_open_findings: List[str]
+    # Ids of the review handoff messages currently in the transcript. The
+    # step-wise flow keeps at most one: the next review removes it before
+    # posting its own, and `plan_finalize` clears whatever is left. Tracked
+    # rather than searched for because `RemoveMessage` raises on an id that is
+    # not there.
+    critic_feedback_ids: List[str]
+    # The gate's reasons for the review now pending, as "code: detail" lines.
+    # Passed forward instead of written into the transcript: the brief is the
+    # critic's input, not something the executor or the user needs to read.
+    critic_triggers: List[str]
+    # Where the evidence slice for the pending review starts — the watermark as
+    # it stood *before* this gate pass moved it. The gate consumes its own
+    # window; the critic node runs after and needs the same one.
+    critic_evidence_after_id: str
+    critic_rounds: int
+    critic_summary: str
+    # How this run is reviewed: "stepwise" (complex — each step checked as it
+    # resolves), "full_run" (simple/follow_up — one review of the finished run),
+    # or "" when the critic is off. Set by `plan_init` from the task category,
+    # so the mode is fixed for the whole run and cannot drift mid-loop.
+    critic_mode: str
+    # Set by the gate for exactly one routing decision. A flag rather than a
+    # scan for the gate's message: on a second pass the previous round's message
+    # is still in the transcript with no user turn between them.
+    critic_pending: bool
+    # Where the loop goes when no review is pending: "execute" (the executor
+    # gets another pass) or "finalize". Written by the gate and by the review
+    # node, read by the routers — both edges then agree by construction, and a
+    # run resumed from a checkpoint routes the way its own state says.
+    critic_next: str
+    # Step-wise bookkeeping. `critic_reviewed_steps` is the watermark: a
+    # terminal step not listed here is new work to check, and the review node
+    # *removes* a step it reopens so the redone version is checked again.
+    critic_reviewed_steps: List[int]
+    critic_scope_steps: List[int]
+    critic_revised_steps: List[int]
+    critic_unresolved_steps: List[int]
+    # Send-backs per step, keyed by step number as a string ("0" = the run as a
+    # whole). Per step rather than per run so one bad step cannot spend the
+    # revision budget the later steps need.
+    critic_step_attempts: Dict[str, int]
+    critic_reviews: int
+    # Consecutive executor passes that resolved nothing new. The loop's only
+    # liveness guard: unresolved steps fall or this rises, so it terminates.
+    critic_stall: int
+    # Id of the last message the previous review saw, so the next step is judged
+    # on the traffic that produced it rather than on the whole turn.
+    critic_watermark_id: str
+    # The verdict, between `critic_agent` and `critic_review`. Written by the
+    # full-run critic's `response_format` (it is a node, and a react agent may
+    # only write keys its `state_schema` knows about) and, in step-wise mode, by
+    # the node that invokes the isolated critic. Read once and cleared.
+    structured_response: Any
 
 
 def _coerce_text(content) -> str:
@@ -465,6 +539,46 @@ def describe_prior_context(messages: Sequence[BaseMessage], *, max_chars: int = 
     return "\n\n".join(parts)
 
 
+def messages_in_current_turn(messages: Sequence[BaseMessage]) -> List[BaseMessage]:
+    """Everything produced since the newest user request opened this turn.
+
+    The critic gate scans this rather than the whole transcript: a tool failure
+    or an ungrounded limit from three turns ago has already been reviewed, and
+    re-triggering on it would make the critic fire forever.
+    """
+    starts = _turn_start_indices(messages)
+    if not starts:
+        return list(messages)
+    return list(messages[starts[-1] :])
+
+
+def messages_after_id(messages: Sequence[BaseMessage], marker_id: str) -> List[BaseMessage]:
+    """Everything appended after the message with `marker_id`.
+
+    The step-wise gate judges one step at a time, so it must see the traffic
+    that produced *that* step. Scored against the whole turn, a recovered
+    failure in step 1 would re-flag every later step for the rest of the run.
+
+    Falls back to the whole turn when the marker is missing — a first review, or
+    a thread checkpointed before the watermark existed. That is the safe
+    direction: too much evidence makes the gate fire, too little makes it miss.
+    """
+    if marker_id:
+        for index in range(len(messages) - 1, -1, -1):
+            if str(getattr(messages[index], "id", "") or "") == marker_id:
+                return list(messages[index + 1 :])
+    return messages_in_current_turn(messages)
+
+
+def last_message_id(messages: Sequence[BaseMessage]) -> str:
+    """Id of the newest message, for use as a review watermark."""
+    for message in reversed(messages):
+        identifier = str(getattr(message, "id", "") or "")
+        if identifier:
+            return identifier
+    return ""
+
+
 def has_completed_turn(messages: Sequence[BaseMessage]) -> bool:
     """True when at least one earlier user turn exists to follow up on."""
     return len(_turn_start_indices(messages)) >= 2
@@ -475,6 +589,19 @@ def _conversation_goal(messages: Sequence[BaseMessage]) -> str:
     if not starts:
         return ""
     return _coerce_text(getattr(messages[starts[0]], "content", None))
+
+
+def _step_numbers(value) -> List[int]:
+    """Sorted, de-duplicated step numbers from a state list, ignoring junk."""
+    numbers: List[int] = []
+    for item in value or []:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in numbers:
+            numbers.append(number)
+    return sorted(numbers)
 
 
 def build_pinned_context_block(state, messages: Sequence[BaseMessage], *, include_goal: bool) -> str:
@@ -515,6 +642,77 @@ def build_pinned_context_block(state, messages: Sequence[BaseMessage], *, includ
         sections.append(
             "Conditions the human attached when approving. They override the "
             "corresponding plan steps:\n" + "\n".join(constraint_lines)
+        )
+
+    # Step-wise review changes how the executor is expected to pace itself, so
+    # the fact that it is active has to survive compression. Only the fact and
+    # the accounting live here; the behaviour it implies is in the execute
+    # prompt, which is also the only agent the instruction applies to.
+    stepwise = _coerce_text(state.get("critic_mode")) == "stepwise"
+    if stepwise:
+        review_lines = [
+            "Review mode: step-wise. Each plan step is checked by a reviewer as "
+            "soon as you record it, before the next step starts. The verdict "
+            "comes back as a single Review message in the conversation — that "
+            "message is the handoff, and it says what to do next."
+        ]
+        accepted = _step_numbers(state.get("critic_reviewed_steps"))
+        if accepted:
+            review_lines.append(
+                "Steps already reviewed: "
+                + ", ".join(str(number) for number in accepted)
+            )
+        sent_back = _step_numbers(state.get("critic_revised_steps"))
+        if sent_back:
+            review_lines.append(
+                "Steps sent back at least once: "
+                + ", ".join(str(number) for number in sent_back)
+            )
+        settled = _step_numbers(state.get("critic_unresolved_steps"))
+        if settled:
+            review_lines.append(
+                "Steps the review settled unresolved (out of revision budget — "
+                "finished with, do not retry them, and do not stop the run over "
+                "them): " + ", ".join(str(number) for number in settled)
+            )
+        sections.append("\n".join(review_lines))
+
+    # Review findings outrank the plan for as long as they are open: the step
+    # they name is not done, whatever the executor concluded the first time.
+    #
+    # Step-wise runs deliver them as the handoff message instead. Pinning them
+    # as well would put the same instruction in front of the executor twice,
+    # from two places that go stale at different moments — and the handoff is
+    # the one that says which of accept / send back / settled just happened.
+    if not stepwise:
+        finding_lines = [
+            f"- {_shorten(str(item).strip(), CRITIC_FINDING_MAX_CHARS)}"
+            for item in (state.get("critic_findings") or [])[:CRITIC_FINDINGS_MAX]
+            if str(item).strip()
+        ]
+        if finding_lines:
+            sections.append(
+                "Review findings on work already done in this run. Each one names "
+                "something that must be corrected or grounded before the run can "
+                "finish; address them before starting anything new:\n"
+                + "\n".join(finding_lines)
+            )
+
+    # Findings nothing is going to fix. Pinned for the whole run because the
+    # report has to carry them into Open Issues, and in step-wise mode the
+    # message that raised them has since been removed from the transcript.
+    open_lines = [
+        f"- {_shorten(str(item).strip(), CRITIC_FINDING_MAX_CHARS)}"
+        for item in (state.get("critic_open_findings") or [])[:CRITIC_FINDINGS_MAX]
+        if str(item).strip()
+    ]
+    if open_lines:
+        sections.append(
+            "Findings this run's reviews left open. They are not work items — "
+            "no further execution pass is going to resolve them — but they are "
+            "part of what the run produced and belong in the report's open "
+            "issues, stated as what is wrong or unverified:\n"
+            + "\n".join(open_lines)
         )
 
     artifacts = describe_output_artifacts(

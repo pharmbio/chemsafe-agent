@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessageChunk
 
 from app.app_config import AppRunConfig
 from app.config import (
+    CRITIC_ENABLED,
     RECURSION_LIMIT,
     STREAM_FLUSH_CHARS,
     STREAM_FLUSH_SECONDS,
@@ -38,16 +39,7 @@ def _resolve_agent_name(
     metadata: Optional[dict] = None,
     default: Optional[str] = None,
 ) -> str:
-    """Which graph node produced this event, in the UI's vocabulary.
-
-    Inside a `create_react_agent` the node is always called `agent` or `tools`,
-    which says nothing a user would recognise. The subgraph namespace carries
-    the parent's name — `('execute_agent_plan:<uuid>',)` — so streaming with
-    `subgraphs=True` makes this a lookup rather than the inference it used to
-    be: the previous version guessed from `langgraph_triggers` strings and
-    `langgraph_checkpoint_ns` prefixes because the flat event stream had thrown
-    the hierarchy away.
-    """
+    """Which graph node produced this event, in the UI's vocabulary."""
     for entry in tuple(namespace or ()):
         if isinstance(entry, str) and entry:
             candidate = entry.split(":", 1)[0]
@@ -81,7 +73,7 @@ def _stream_chunk_text(chunk: Any) -> str:
 
 
 _checkpointer_lock: asyncio.Lock | None = None
-_app_cache: dict[bool, Any] = {}
+_app_cache: dict[tuple[bool, bool], Any] = {}
 _app_cache_lock: asyncio.Lock | None = None
 
 
@@ -94,18 +86,16 @@ async def _get_checkpointer():
         return await get_postgres_checkpointer()
 
 
-async def get_compiled_app(use_context_compression: bool = True):
-    """Return the compiled graph, building it at most once per variant.
-
-    The checkpointer is a process-wide singleton, so the compiled graph is safe
-    to reuse. Rebuilding it per run meant re-instantiating three chat models and
-    six react agents on every user message.
-    """
+async def get_compiled_app(
+    use_context_compression: bool = True,
+    use_critic: bool = CRITIC_ENABLED,
+):
+    """Return the compiled graph, building it at most once per variant."""
     global _app_cache_lock
     if _app_cache_lock is None:
         _app_cache_lock = asyncio.Lock()
 
-    key = bool(use_context_compression)
+    key = (bool(use_context_compression), bool(use_critic))
     cached = _app_cache.get(key)
     if cached is not None:
         return cached
@@ -115,29 +105,24 @@ async def get_compiled_app(use_context_compression: bool = True):
         if cached is not None:
             return cached
         checkpointer = await _get_checkpointer()
-        app = await create_app(checkpointer, use_context_compression=key)
+        app = await create_app(
+            checkpointer,
+            use_context_compression=key[0],
+            use_critic=key[1],
+        )
         _app_cache[key] = app
         return app
 
 
 @asynccontextmanager
 async def app_session(app_config: AppRunConfig):
-    yield await get_compiled_app(app_config.use_context_compression)
+    yield await get_compiled_app(
+        app_config.use_context_compression, app_config.use_critic
+    )
 
 
 def _interrupt_payloads(snapshot: Any) -> list[dict[str, Any]]:
-    """The values passed to `interrupt()` by whatever paused this graph.
-
-    `human_chat_node` raises a structured payload — `{"type": "plan_review",
-    "plan": ..., "message": ...}` — and that is what the approval panel is built
-    from. Reading only `snapshot.next` told us *that* the graph had paused but
-    threw away everything about *why*, so the UI could not say what it was
-    waiting for.
-
-    LangGraph exposes interrupts on the snapshot directly in recent versions and
-    on each pending task in older ones; both are read so the payload survives a
-    checkpointer upgrade.
-    """
+    """The values passed to `interrupt()` by whatever paused this graph."""
     payloads: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -166,15 +151,7 @@ async def read_pending_approval(
     *,
     use_context_compression: bool = True,
 ) -> Optional[dict[str, Any]]:
-    """The plan-review payload if `thread_id` is paused for approval, else None.
-
-    The graph is the single source of truth for this. The UI's own flag lives in
-    per-browser Gradio session state, which is reset by thread switches, page
-    reloads and app restarts; when it disagreed with the graph, the next message
-    was sent as fresh input instead of a resume, and LangGraph silently
-    restarted the run from START — re-classifying, re-planning and interrupting
-    again.
-    """
+    """The plan-review payload if `thread_id` is paused for approval, else None."""
     if not thread_id:
         return None
     try:
