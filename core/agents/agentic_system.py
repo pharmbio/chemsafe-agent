@@ -1688,6 +1688,7 @@ async def create_app(
     planning_llm = init_chat_model(PLANNING_MODEL, model_provider="openai", api_key=OPENAI_API_KEY)
     execute_llm = init_chat_model(EXECUTE_MODEL, model_provider="openai", api_key=OPENAI_API_KEY)
     summary_llm = init_chat_model(SUMMARY_MODEL, model_provider="openai", api_key=OPENAI_API_KEY)
+    critic_llm = init_chat_model(CRITIC_MODEL, model_provider="openai", api_key=OPENAI_API_KEY)
 
     pre_model_hook = build_pre_model_state if use_context_compression else build_uncompressed_pre_model_state
 
@@ -1715,9 +1716,6 @@ async def create_app(
 
     critic_agent_node = None
     if use_critic:
-        critic_llm = init_chat_model(
-            CRITIC_MODEL, model_provider="openai", api_key=OPENAI_API_KEY
-        )
         # Two critics behind one node. The full-run one shares the run's
         # transcript, which is the right input when the run is one step long.
         # The step-wise one is isolated: it is handed a case file per step and
