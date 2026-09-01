@@ -1,25 +1,25 @@
 ---
 name: woe_reasoning
-description: Weigh already-gathered evidence into a defensible conclusion, score each source for quality, reliability, and authority for the question actually asked, surface contradictions between them. Use once retrieval or prediction has produced evidence from more than one source, or whenever a chemical safety conclusion needs a stated confidence, even if the user never says weight of evidence.
+description: Weigh already-gathered evidence into a defensible conclusion — score each source for quality and reliability, rank sources by authority for the question actually asked, surface contradictions between them, and emit a structured weight-of-evidence report carrying an explicit confidence level. Use once retrieval or prediction has produced evidence from more than one source, or whenever a chemical safety conclusion needs a stated confidence, even if the user never says weight of evidence.
 ---
 
 # WoE: Weight of Evidence for Chemical Safety
 
-Run all five blocks in order; never skip one, even when evidence is absent or partial.
+Run all five blocks in order; **never skip one, even when evidence is absent or partial.**
 Read `references/woe-detail.md` before resolving any numeric difference, and for the full
 handling of Cases B–I and the canonical ALERT-01…05 text.
 
 ## BLOCK 1 — Inspect
 
-**1.1** Record the sources consulted, the values/statements retrieved, and the substance (Compound X). If no documents retrieved → `EVIDENCE_FOUND = FALSE`, `C = 0`, **ALERT-01**, skip Blocks 2–3, go to Block 4.
+**1.1** Record the sources consulted, the values/statements retrieved, and the substance (**Compound X**). No documents retrieved → `EVIDENCE_FOUND = FALSE`, `C = 0`, **ALERT-01**, skip Blocks 2–3, go to Block 4.
 
-**1.2 Determine `QUERY_TYPE`** — one or more of: Regulatory, Toxicological, Phytochemical, Drug-like, Environmental, and Safety/Hazard.
+**1.2 `QUERY_TYPE`** — one or more of: Regulatory · Toxicological · Phytochemical · Drug-like · Environmental · Safety/Hazard.
 
-**1.3 Determine `EVIDENCE_TYPE`** — **Q** (numeric: LD50, NOAEL, OEL, flash point) or **N** (normative: SOP, guidance, a classification with no number). Each Q also gets `MODEL_TYPE`: Q-vivo (animal/human), Q-vitro (cell assay), Q-silico (QSAR/read-across), Q-unknown. Informational; never changes priority.
+**1.3 `EVIDENCE_TYPE`** — **Q** (numeric: LD50, NOAEL, OEL, flash point) or **N** (normative: SOP, guidance, a classification with no number). Each Q also gets `MODEL_TYPE`: Q-vivo (animal/human), Q-vitro (cell assay), Q-silico (QSAR/read-across), Q-unknown. Informational; never changes priority.
 
-**1.4 Determine `DATA_POINT`** per Q item — what the number means for the question asked:
+**1.4 `DATA_POINT`** per Q item — what the number means for the question asked:
 
-`quantity, kind of measure, species/population, route` — plus, separately, the **instrument** (experimental study, read-across, QSAR, health-based recommendation, enforceable legal limit, consensus guideline) and whether the value is a **point estimate** or a **bound** (`> 5000 mg/kg` states only that the LD50 exceeds 5000). A NIOSH REL and an OSHA PEL are both `airborne limit, full-shift TWA, worker, inhalation`, on different instruments.
+`quantity · kind of measure · species/population · route` — plus, separately, the **instrument** (experimental study, read-across, QSAR, health-based recommendation, enforceable legal limit, consensus guideline) and whether the value is a **point estimate** or a **bound** (`> 5000 mg/kg` states only that the LD50 exceeds 5000). A NIOSH REL and an OSHA PEL are both `airborne limit · full-shift TWA · worker · inhalation`, on different instruments.
 
 Granularity comes from the question: a convention that does not change which decision the number informs does **not** split the data point (8-h and 10-h full-shift TWAs are both the routine full-shift limit); a difference in *kind* does (TWA vs 15-min STEL vs ceiling).
 
@@ -43,14 +43,14 @@ Granularity comes from the question: a convention that does not change which dec
 
 | Type | Expected databases |
 |---|---|
-| Regulatory and Safety/Hazard | PubChem (LCSS), ECHA CHEM, NIOSH, OPCW (+ OpenFoodTox) |
+| Regulatory · Safety/Hazard | PubChem (LCSS), ECHA CHEM, NIOSH, OPCW (+ OpenFoodTox) |
 | Toxicological | ISSTOX, T3DB, ECOTOX, EnviroTox |
 | Environmental | ERED (USACE), ECOTOX, EnviroTox |
-| Phytochemical and Drug-like | PubChem (+ ECHA CHEM) |
+| Phytochemical · Drug-like | PubChem (+ ECHA CHEM) |
 
 ## THE COMPARABILITY GATE — governs Blocks 3 and 4
 
-**Score two items against each other only when their `DATA_POINT` matches.** Write the shared data point on one line before comparing; if you cannot, there is nothing to compare and nothing to resolve, for example a rat LD50 neither agrees nor disagrees with a cat LD50. Non-matching items are `agrees = N/A`, excluded from T and A, and reported beside the finding as context — more information, not dissent. Scoring across data points fails unsafe: it manufactures a disagreement, divides C by it, and reports a sound conclusion as low-confidence.
+**Score two items against each other only when their `DATA_POINT` matches.** Write the shared data point on one line before comparing; if you cannot, there is nothing to compare and nothing to resolve — a rat LD50 neither agrees nor disagrees with a cat LD50. Non-matching items are `agrees = N/A`, excluded from T and A, and reported beside the finding as context — more information, not dissent. Scoring across data points fails unsafe: it manufactures a disagreement, divides C by it, and reports a sound conclusion as low-confidence.
 
 **Legitimate differences**, reported side by side with **no ALERT-03 and no reduction in C**: different instruments for one quantity (a NIOSH REL, an OSHA PEL and an ACGIH TLV are a recommendation, a legal minimum and a guideline — all hold at once), different species, different route or averaging basis, a bound against a point estimate, hazard identification against risk assessment.
 
@@ -69,9 +69,9 @@ Granularity comes from the question: a convention that does not change which dec
 
 Same-database entries count independently; intra-database variability lowers C by design.
 
-**3.2** `C = 1.0` with T ≥ 2 → ✅ High; `0.7 ≤ C < 1.0` → 🟡 Moderate-high; `0.5 ≤ C < 0.7` → 🟠 Moderate; `0.1 < C < 0.5` → 🔴 Low; `C ≤ 0.1` → 🔴 Very low; `C = 0` → ⚫ No data.
+**3.2** `C = 1.0` with T ≥ 2 → ✅ High · `0.7 ≤ C < 1.0` → 🟡 Moderate-high · `0.5 ≤ C < 0.7` → 🟠 Moderate · `0.1 < C < 0.5` → 🔴 Low · `C ≤ 0.1` → 🔴 Very low · `C = 0` → ⚫ No data.
 
-**3.3 T = 1**: this means one source reported the quantity. Notice that two bodies publishing the same value are two sources, not one. C = 1.0 arithmetically but carries no information — a single source cannot disagree with itself. Label **⚪ Single source — unscored**, never high confidence, and append "Confidence score is based on a single source. Independent corroboration is recommended." Do not justify the score by noting that nothing contradicts the source; nothing was in a position to.
+**3.3 T = 1**: this means one source reported the quantity — two bodies publishing the same value are two sources, not one. C = 1.0 arithmetically but carries no information — a single source cannot disagree with itself. Label **⚪ Single source — unscored**, never high confidence, and append "Confidence score is based on a single source. Independent corroboration is recommended." Do not justify the score by noting that nothing contradicts the source; nothing was in a position to.
 
 ## BLOCK 4 — Resolve
 
@@ -117,7 +117,7 @@ one row per entry; Agrees = Yes/No/N/A, and N/A covers every entry on another da
 Append: "This WoE Report is intended for use by the summary agent. The confidence score (C), alerts, and primary finding should be incorporated into the final response to the user. Do not omit alerts from the final summary."
 
 ## CONDITIONAL CASES — apply the FIRST match
-**A** evidence, C ≥ 0.7, no ALERT-03; **B** ALERT-03 raised; **C** ALERT-02, expected DBs missing; **D** no evidence / all priority 1; **E** unknown compound (no CAS, no registry entry); **F** ≥ 2 `QUERY_TYPE`; **G** priority-2 user data vs a priority 3–5 source; **H** same DB, divergent model types; **I** all items Type N, no Q.
+**A** evidence, C ≥ 0.7, no ALERT-03 · **B** ALERT-03 raised · **C** ALERT-02, expected DBs missing · **D** no evidence / all priority 1 · **E** unknown compound (no CAS, no registry entry) · **F** ≥ 2 `QUERY_TYPE` · **G** priority-2 user data vs a priority 3–5 source · **H** same DB, divergent model types · **I** all items Type N, no Q.
 
 Case A is the default and needs nothing special — but most runs that *look* like B are really A, so apply the gate before concluding there is a conflict. **For any match other than A, read `references/woe-detail.md` and follow the handling there.**
 
