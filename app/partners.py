@@ -18,7 +18,7 @@ PARTNER_ORGANIZATIONS: List[Dict[str, str]] = [
         {
         "name": "Merck Life Science",
         "logo": "images/merck_logo.png",
-        "url": "https://www.merck.com",
+        "url": "https://www.merckgroup.com/en",
         "size": "xl",
     },
         {
