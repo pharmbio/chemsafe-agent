@@ -50,3 +50,4 @@ typer==0.21.1
 bm25s==0.3.10
 pysbd==0.3.4
 pyarrow
+nonconformist
