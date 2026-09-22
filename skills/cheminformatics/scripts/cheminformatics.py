@@ -242,7 +242,8 @@ def find_structural_alerts(
         smarts = entry[0].filterMatch.GetPattern() if entry else None
         out.append(
             {
-                "catalog": match.GetProp("FilterSet") if match.HasProp("FilterSet") else None,
+                # FilterCatalogEntry exposes GetPropList(), not HasProp().
+                "catalog": match.GetProp("FilterSet") if "FilterSet" in match.GetPropList() else None,
                 "alert": match.GetDescription(),
                 "description": match.GetDescription(),
                 "smarts": Chem.MolToSmarts(smarts) if smarts is not None else None,

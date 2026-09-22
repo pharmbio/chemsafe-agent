@@ -1,9 +1,8 @@
-# Tier A reference — deterministic structure operations
+# Structure operations reference
 
 Full usage for `scripts/cheminformatics.py`. Everything here is computed from the
-structure itself and is reproducible fact, not prediction.
-
-# Tier A — Deterministic structure ops
+structure itself and is reproducible fact, not prediction. For predicted
+endpoints see the `qsar_modelling` skill.
 
 ## Parsing and Input Validation
 
@@ -66,7 +65,7 @@ Rules:
 
 ## Physchem Descriptors
 
-Use to produce the physicochemical line of evidence (Line 6 in `woe_reasoning`), to supply features for PBT / vPvB screening, or to provide ADME/kinetics context. The Tier-B helpers (`calc_drug_likeness`, `calc_ecotoxicology`, `calc_melting_point`) consume the same dict, so you only compute it once.
+Use to produce the physicochemical line of evidence (Line 6 in `woe_reasoning`), to supply features for PBT / vPvB screening, or to provide ADME/kinetics context. Compute the dict once and reuse it — downstream skills consume the same keys.
 
 ```python
 from scripts.cheminformatics import compute_descriptors, lipinski_flags
@@ -79,12 +78,12 @@ desc = compute_descriptors(std.canonical_smiles)
 #     "fraction_csp3": ..., "qed_drug_likeness": ...}
 ```
 
-For what each key means and the `woe_reasoning` line of evidence it supports, see the descriptor glossary in [`references/reference-tables.md`](references/reference-tables.md#physicochemical-descriptor-glossary).
+For what each key means and the `woe_reasoning` line of evidence it supports, see the descriptor glossary in [`reference-tables.md`](reference-tables.md#physicochemical-descriptor-glossary).
 
 Rules:
 
 - **`logp_crippen` is the Crippen estimate, not an experimental logP.** If an experimental value is available (via `database_traversal` PubChem), prefer that for the evidence table and record the RDKit estimate only as a sanity check.
-- **Lipinski / Veber / Egan / Ghose / QED rules are drug-likeness filters, not hazard criteria.** `lipinski_flags(desc)` (Tier A) and `calc_drug_likeness(desc)` (Tier B) provide them for context but must not enter a hazard classification argument.
+- **Lipinski / Veber / Egan / Ghose / QED rules are drug-likeness filters, not hazard criteria.** `lipinski_flags(desc)` provides them for context but they must not enter a hazard classification argument.
 - **For PBT / vPvB screening**, logP and MW are necessary but not sufficient — the PBT call lives in `woe_reasoning` against REACH Annex XIII criteria surfaced by `sop_search`.
 - Descriptors do not require standardized input to compute, but the values are only comparable across compounds if the inputs were standardized consistently.
 
@@ -96,7 +95,7 @@ Use to produce the mechanistic line of evidence (Line 7 in `woe_reasoning`). Pre
 
 ### Built-in RDKit catalogs (preferred)
 
-`build_filter_catalog` accepts these keys: `pains` (HTS frequent hitters), `brenk` (reactive/toxic/unstable functionality), `nih` (NIH annotated unwanted features), `zinc` (ZINC15 drug-likeness), and `chembl` (ChEMBL curation filters). For the authoritative citation to record alongside each hit, see [`references/reference-tables.md`](references/reference-tables.md#built-in-filtercatalog-provenance).
+`build_filter_catalog` accepts these keys: `pains` (HTS frequent hitters), `brenk` (reactive/toxic/unstable functionality), `nih` (NIH annotated unwanted features), `zinc` (ZINC15 drug-likeness), and `chembl` (ChEMBL curation filters). For the authoritative citation to record alongside each hit, see [`reference-tables.md`](reference-tables.md#built-in-filtercatalog-provenance).
 
 ```python
 from scripts.cheminformatics import (
@@ -199,7 +198,7 @@ Rules:
 
 ## Applicability Domain (QSAR Principle 3)
 
-Use whenever a QSAR prediction will enter `woe_reasoning`. Without an AD report, the prediction cannot be weighted under OECD Principle 3. This applies to **every** Tier-B endpoint as well: admet-ai, Tox21, the ecotox narcosis QSARs, and the melting-point empirical QSAR all have their own ADs.
+Use whenever a QSAR prediction will enter `woe_reasoning`. Without an AD report, the prediction cannot be weighted under OECD Principle 3. This applies to **every** predicted endpoint, including each `qsar_modelling` endpoint — those carry their own conformal AD signal, which this helper complements rather than replaces.
 
 **Precondition:** target SMILES and the training-set SMILES must be standardized with the same flags.
 
@@ -222,7 +221,7 @@ Rules:
 - **Outside AD ⇒ QSAR prediction cannot carry decisive weight** in `woe_reasoning`, regardless of the model's overall accuracy. This is non-negotiable under OECD Principle 3.
 - **Record both** the AD report and the model's stated reliability metric. Reviewers need both to decide the weight.
 - **If the training set is not available**, state this as a data gap in `woe_reasoning`. Do not substitute a generic "drug-like" AD — it is not the QSAR model's AD.
-- **Tier-B endpoints inherit AD constraints.** The ecotox baseline-narcosis models are valid for non-ionic organics with logP ~0–7 and MW ~50–500 (see [Ecotoxicology](#ecotoxicology-baseline-narcosis-qsars)); admet-ai and Tox21 ADs are model-specific and must be sourced from their publications.
+- **Every predicted endpoint inherits an AD constraint.** The `qsar_modelling` conformal models report theirs in-band as the `empty` region; any other model's AD must be sourced from its publication and recorded with the value.
 
 ---
 

@@ -1,17 +1,14 @@
 # Cheminformatics reference tables
 
 Consulted-as-needed lookups for the cheminformatics skill. Read the relevant
-section when you need descriptor meanings, catalog provenance, ADMET output
-scales, or ecotox model citations. Nothing here is executable — call the helpers
-as shown in `SKILL.md`; this file only documents what their outputs mean and
-where they come from.
+section when you need descriptor meanings or catalog provenance. Nothing here is
+executable — call the helpers as shown in `SKILL.md`; this file only documents
+what their outputs mean and where they come from.
 
 ## Contents
 
 - [Physicochemical descriptor glossary](#physicochemical-descriptor-glossary)
 - [Built-in FilterCatalog provenance](#built-in-filtercatalog-provenance)
-- [ADMET output scale conventions](#admet-output-scale-conventions)
-- [Ecotoxicology model references](#ecotoxicology-model-references)
 
 ---
 
@@ -52,32 +49,3 @@ authoritative citation to record alongside any hit.
 | `chembl` | Structural filters from ChEMBL's curation workflow                   | ChEMBL                                      |
 
 ---
-
-## ADMET output scale conventions
-
-Units and scales returned by `calc_admet` (admet-ai / Chemprop MPNN, TDC-trained).
-
-| Suffix / key                  | Scale                                                              |
-|-------------------------------|-------------------------------------------------------------------|
-| `*_prob`                      | probability in [0, 1] (binary classifier)                         |
-| `LD50_oral_log_mg_per_kg`     | log10(mg/kg); helper also exposes `LD50_oral_mg_per_kg = 10**value` |
-| `caco2_permeability_log_cm_s` | log10(cm/s)                                                       |
-| `solubility_log_mol_L`        | log10(mol/L)                                                      |
-| `VDss_log_L_per_kg`           | log10(L/kg)                                                       |
-
-Reference: Swanson et al. 2023 — github.com/swansonk14/admet_ai.
-
----
-
-## Ecotoxicology model references
-
-Baseline-narcosis QSARs behind `calc_ecotoxicology`. Valid for non-ionic organics
-with logP ~0–7 and MW ~50–500; reactive, electrophilic, or ionisable compounds
-may deviate >1 log unit — flag explicitly.
-
-| Endpoint                        | Model reference                          |
-|---------------------------------|------------------------------------------|
-| Fish (Fathead minnow 96-h LC50) | Veith et al. 1983 (baseline narcosis)    |
-| Daphnia magna 48-h EC50         | Cronin & Dearden 1995 (baseline narcosis)|
-| Green algae 72-h EC50           | Netzeva et al. 2005 (simplified)         |
-| BCF                             | Meylan et al. 1999                       |
