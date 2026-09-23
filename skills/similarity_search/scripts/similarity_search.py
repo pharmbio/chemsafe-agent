@@ -28,7 +28,7 @@ def search(query_smiles, db, db_pop, meta, k=10, chunk=256, output_name=None):
     returns     : a message naming the file, plus any SMILES that could not be parsed
     """
 
-    # HANDLE OUTPUT_PATH
+    # Handle output_path
     output_path = Path(output_name) if output_name else None
     if output_path is None or not output_path.is_absolute():
         raise ValueError(

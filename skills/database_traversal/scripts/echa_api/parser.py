@@ -23,7 +23,6 @@ _EMPTY = frozenset(
 )
 
 
-
 # Value cleaning + label/value extraction
 def clean_value(text: str) -> str:
     """Collapse whitespace and drop ECHA's empty-value placeholders."""
@@ -107,7 +106,6 @@ def _add_key(target: dict, key: str, value: object) -> None:
         target[key] = [target[key], value]
 
 
-
 # Generic dossier-document parsing (Sections 4/5/6)
 def parse_document(html: str, name: str, doc_type: str, section: str) -> dict:
     """Parse one ECHA HTML document into nested label/value blocks."""
@@ -176,8 +174,7 @@ def _append_block(result: dict, block) -> None:
         _add_key(result, key, value)
 
 
-
-# Index scanning — locating document links per dossier section
+# Index scanning: locating document links per dossier section
 def _doc_type(name: str) -> str:
     lowered = name.lower()
     return "Summary" if lowered.startswith("s-") or "summary" in lowered else "Study"
@@ -376,7 +373,6 @@ def _scan_section_docs(index_html: str, section: str) -> list[dict]:
     return docs
 
 
-
 # Dossier selection
 def _iter_dossier_items(data) -> list[dict]:
     return (data or {}).get("items", []) if isinstance(data, dict) else []
@@ -476,7 +472,6 @@ async def select_best_dossier(client: ECHAClient, substance_index: str) -> dict 
             return scored[0]
 
     return None
-
 
 
 # Section 2.1 (GHS) and 2.3 (PBT)
@@ -587,7 +582,6 @@ def _parse_pbt_document(html: str, name: str, doc_type: str) -> dict:
     return {("summary_name" if is_summary else "study_name"): name, "data": data}
 
 
-
 # Sections 4/5/6 orchestration
 async def parse_dossier_sections(
     client: ECHAClient,
@@ -644,7 +638,6 @@ async def parse_dossier_sections(
         "total_summaries": sum(len(s["summaries"]) for s in parsed_sections.values()),
         "total_studies": sum(len(s["studies"]) for s in parsed_sections.values()),
     }
-
 
 
 # Section 7 (toxicology)
@@ -891,7 +884,6 @@ def _infer_section_from_context(link_el, name: str) -> str | None:
     return None
 
 
-
 # Identifier picking
 _CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
 
@@ -902,7 +894,6 @@ def select_best_cas(cas_list: list[str]) -> str:
         if _CAS_RE.match(cas.strip()):
             return cas.strip()
     return cas_list[0] if cas_list else ""
-
 
 
 # C&L inventory classification assembly (shared by CLP + harmonised)
@@ -957,7 +948,6 @@ def pictogram_list(pictograms) -> list[dict]:
         {"code": p.get("code", ""), "text": p.get("text", "")}
         for p in unwrap_items(pictograms)
     ]
-
 
 
 # GHS hazard category -> H statement code
