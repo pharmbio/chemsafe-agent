@@ -74,8 +74,8 @@ from core.prompts.prompts import (
 
 TaskCategory = Literal["simple", "complex", "meta_query", "follow_up"]
 
-# How a run is reviewed. Chosen from the task category by `_mode_for_category`
-# and stamped on the run by `plan_init`, so it cannot drift mid-loop.
+# Review mode: derived from the task category, stamped on the run by plan_init
+# so it cannot drift mid-loop.
 STEPWISE = "stepwise"
 FULL_RUN = "full_run"
 
@@ -108,8 +108,8 @@ class PlanFeedbackVerdict(BaseModel):
     )
 
 
-# AgentGraphState lives in core.agents.context because every react agent must be
-# built with it as `state_schema`; see the note on the class.
+# AgentGraphState lives in core.agents.context: every react agent needs it as
+# state_schema.
 SUMMARY_PROMPT = (
     "You maintain the carry-forward record for a chemical safety workflow so "
     "that later turns can continue the work without re-reading the transcript.\n\n"
@@ -300,8 +300,8 @@ async def task_classifier_node(state: AgentGraphState) -> dict[str, Any]:
     if not user_text:
         return {"task_category": "complex"}
 
-    # Routing a follow-up ("now redo it with the peak value") is impossible from
-    # the bare message, so the classifier sees the goal and the last exchange.
+    # A follow-up ("now redo it with the peak value") is unroutable from the bare
+    # message, so the classifier gets the goal and the last exchange.
     prior_context = describe_prior_context(messages)
     can_follow_up = has_completed_turn(messages)
     if prior_context:
@@ -332,10 +332,8 @@ async def task_classifier_node(state: AgentGraphState) -> dict[str, Any]:
 
     updates: dict[str, Any] = {"task_category": category}
     if category in ("complex", "simple"):
-        # The approval belongs to the plan it was given for. A new task —
-        # whether it gets its own plan or not — is not governed by it. Only
-        # follow-ups continue under the standing approval; meta queries are left
-        # alone so an aside does not discard a plan a later follow-up needs.
+        # An approval binds only its own plan. Follow-ups continue under it; meta
+        # queries are left alone so an aside does not discard a still-needed plan.
         updates["approved_plan"] = ""
         updates["approval_constraints"] = []
     return updates
@@ -425,9 +423,8 @@ def human_chat_node(state: AgentGraphState) -> dict[str, Any]:
     feedback = (human_input or "").strip()
     decision, constraints = _judge_plan_feedback(feedback, plan)
 
-    # The human's words are kept on the record either way. Previously an
-    # approval carrying a qualifier ("approved, but use the STEL") was reduced
-    # to a bare status flag and the qualifier never reached the executor.
+    # Keep the human's words: a qualifier ("approved, but use the STEL") must not
+    # be flattened into a bare status flag before it reaches the executor.
     messages: list[BaseMessage] = []
     if feedback:
         messages.append(HumanMessage(content=feedback))
@@ -473,10 +470,8 @@ def _fresh_review_state(mode: str) -> dict[str, Any]:
     one's context as an instruction the executor cannot act on, and the round
     budget would already be spent before the critic had seen anything.
     """
-    # `critic_feedback_ids` is deliberately absent. It names messages that are
-    # still in the transcript, and forgetting them is exactly what would leave a
-    # spent handoff instruction standing in front of the next run with nothing
-    # left able to remove it. `plan_finalize` clears them at the end of a run.
+    # critic_feedback_ids is deliberately absent: dropping the ids would strand a
+    # spent handoff in the transcript. plan_finalize clears them per run.
     return {
         "critic_mode": mode,
         "critic_findings": [],
@@ -497,7 +492,6 @@ def _fresh_review_state(mode: str) -> dict[str, Any]:
         "critic_evidence_after_id": "",
         "structured_response": None,
     }
-
 
 
 def make_plan_init_node(*, use_critic: bool):
@@ -533,8 +527,8 @@ def plan_init_node(state: AgentGraphState, *, use_critic: bool = True) -> dict[s
         steps = plan_store.parse_plan_steps(plan_text)
         goal = plan_store.parse_plan_goal(plan_text) or request
     else:
-        # Routes with no approved plan still get a section, so the document
-        # stays a complete record of the conversation and follow-ups can read it.
+        # Planless routes still get a section, so the document stays a complete
+        # record for follow-ups to read.
         steps = [plan_store.PlanStep(number=1, title=_plan_title(request))]
         goal = request
 
@@ -547,10 +541,8 @@ def plan_init_node(state: AgentGraphState, *, use_critic: bool = True) -> dict[s
             **_plan_scope(state),
         )
     except OSError as exc:
-        # Never let bookkeeping stop the actual work. Step-wise review is the
-        # one thing that cannot survive here: its boundaries are the step
-        # statuses in the file that just failed to be written, so the run falls
-        # back to a single review of whatever the executor manages.
+        # Bookkeeping must not stop the work. Step-wise review needs the step
+        # statuses from the file that just failed to write, so fall back to full_run.
         logger.warning("Could not write the plan file: %s", exc)
         return _fresh_review_state(FULL_RUN if use_critic else "")
 
@@ -572,8 +564,8 @@ def plan_finalize_node(state: AgentGraphState) -> dict[str, Any]:
     Reads back what actually happened rather than asking the model to report it.
     """
     scope = _plan_scope(state)
-    # Even when the accounting cannot be written, the standing handoff has to
-    # go: it is an instruction about a run that is over.
+    # The standing handoff must go even when the accounting cannot be written:
+    # it instructs on a run that is over.
     spent = {"messages": _feedback_removals(state), "critic_feedback_ids": []}
     try:
         document = plan_store.load_document(**scope)
@@ -596,19 +588,15 @@ def plan_finalize_node(state: AgentGraphState) -> dict[str, Any]:
             + ("…" if len(unresolved) > 8 else "")
         )
 
-    # Whether the run was reviewed, and what came of it, goes into the durable
-    # record alongside the step accounting — otherwise the critic's effect is
-    # invisible the moment the conversation scrolls, and there is nothing to
-    # measure the trial against.
+    # Record the review next to the step accounting, or the critic's effect
+    # vanishes as soon as the conversation scrolls.
     review = _coerce_plan_text(state.get("critic_summary")).strip()
     if review:
         outcome = f"{outcome} Review: {review}."
     plan_store.set_outcome(outcome=outcome, run_id=run.run_id, **scope)
 
-    # The last review's handoff has done its job — the run is over, and an
-    # instruction to "continue with step 7" must not survive into the summary
-    # agent's context or into the next turn. What it reported that nothing
-    # resolved is already in `critic_open_findings`, which is pinned.
+    # Drop the last handoff: "continue with step 7" must not reach the summary
+    # agent or the next turn. Unresolved findings are pinned in critic_open_findings.
     return {
         "messages": _feedback_removals(state)
         + [
@@ -661,40 +649,21 @@ def approval_ack_node(state: AgentGraphState) -> dict[str, Any]:
     return {"messages": [AIMessage(content=content, name="approval_ack")]}
 
 
-# --------------------------------------------------------------------------
-# Critic
-# --------------------------------------------------------------------------
+# Critic. Two review shapes over one set of parts:
 #
-# Two review shapes over one set of parts:
+#   full_run (simple, follow_up)  execute → gate → [critic → review] → plan_finalize
+#   stepwise (complex)            execute → gate → [critic → review] → execute → …
+#                                        ↑______________________________________|
 #
-#   full_run (simple, follow_up)
-#       execute → gate → [critic → review] → plan_finalize
+# full_run shares the run's transcript. Step-wise cannot: the transcript only grows
+# inside a run, so an inheriting critic would read more of the *other* steps every
+# time. It runs isolated on a case file from critic_context and returns a verdict.
+# The executor therefore holds its own traffic plus at most the current handoff,
+# removed once its step settles, so review never rewrites its working context.
 #
-#   stepwise (complex)
-#       execute → gate → [critic → review] → execute → … → plan_finalize
-#              ↑_______________________________________|
-#
-# The two differ in more than shape. Full-run review shares the transcript: the
-# critic is handed the run it is judging, which is the whole turn. Step-wise
-# review does not, and cannot — inside a run the transcript only grows (context
-# compression runs at the end of a branch), so a critic that inherited it would
-# read more of the *other* steps with every step. The step-wise critic is
-# invoked outside the flow on a case file built by `critic_context`, and the
-# only thing that comes back is a verdict.
-#
-# So the main flow stays the executor's. At any point in a step-wise run its
-# transcript is its own traffic plus at most one review message — the current
-# handoff, which is removed once the step it concerns is settled. That is what
-# lets the executor be interrupted for review without its working context being
-# rewritten underneath it.
-#
-# The step-wise loop is driven by the plan file, not by a counter in the prompt:
-# a terminal step the review has not seen yet is work to check, an unresolved
-# step is work still to do, and both are read back from `plan.md` on every pass.
-# The executor is asked (in its system prompt, activated by the pinned review
-# section) to resolve one step and hand back — but the loop does not depend on
-# it complying. If it resolves three steps in a pass, those three are reviewed
-# together; if it resolves none, `critic_stall` ends the loop.
+# The loop is driven by plan.md, not a prompt counter: terminal-but-unreviewed steps
+# are work to check, unresolved steps are work to do. Three steps resolved in a pass
+# are reviewed together; none resolved and critic_stall ends the loop.
 
 
 def _load_review_run(state: AgentGraphState) -> plan_store.PlanRun | None:
@@ -789,8 +758,7 @@ def _full_run_gate(
 ) -> dict[str, Any]:
     rounds = int(state.get("critic_rounds") or 0)
     if rounds >= CRITIC_MAX_ROUNDS:
-        # Already reviewed and remediated once. A second opinion on the same run
-        # is where a critic loop stops paying for itself.
+        # Reviewed and remediated once already; a second opinion stops paying off.
         return {"critic_pending": False, "critic_findings": [], "critic_next": "finalize"}
 
     triggers = critic_gate.evaluate(
@@ -823,8 +791,7 @@ def _full_run_gate(
         "critic_summary": f"reviewed ({codes})",
         "critic_scope_steps": [],
         "critic_watermark_id": watermark,
-        # Overwritten by the review node; "finalize" is the safe standing value
-        # if anything downstream fails to produce a decision.
+        # Overwritten by the review node; safe default if no decision is produced.
         "critic_next": "finalize",
     }
 
@@ -849,9 +816,8 @@ def _stepwise_gate(
     unresolved = _unresolved_steps(run)
     reviews = int(state.get("critic_reviews") or 0)
 
-    # Liveness. A pass that resolved nothing new is the only way this loop can
-    # fail to advance, so it is the only thing counted — and it is counted even
-    # when the plan file is unreadable, which looks the same from here.
+    # Liveness: resolving nothing new is the only way this loop fails to advance,
+    # so it is the only thing counted, including when the plan file is unreadable.
     stall = 0 if resolved else int(state.get("critic_stall") or 0) + 1
 
     updates: dict[str, Any] = {
@@ -862,8 +828,7 @@ def _stepwise_gate(
     run_id = state.get("plan_run_id")
 
     if resolved and reviews >= CRITIC_MAX_REVIEWS:
-        # Out of review budget, not out of work: execution continues unreviewed
-        # rather than stopping. Recorded so the trial can see it happened.
+        # Out of review budget, not out of work: continue unreviewed, and record it.
         logger.warning(
             "Critic gate: review budget (%s) spent; steps %s go unreviewed (run %s)",
             CRITIC_MAX_REVIEWS,
@@ -902,16 +867,14 @@ def _stepwise_gate(
                 "critic_pending": True,
                 "critic_scope_steps": resolved,
                 "critic_triggers": [str(trigger) for trigger in triggers],
-                # The window that produced these steps, for the critic's case
-                # file. `critic_watermark_id` has already moved on in `updates`.
+                # Window that produced these steps; critic_watermark_id has moved on.
                 "critic_evidence_after_id": previous,
                 "critic_next": "finalize",
             }
         )
-        # The brief only enters the transcript when the critic is going to read
-        # the transcript. An isolated critic gets it inside its case file, and
-        # putting it here as well would be one more piece of review traffic in
-        # the executor's flow that says nothing the executor needs.
+        # The brief enters the transcript only if the critic will read it. An isolated
+        # critic gets it in its case file; duplicating it here tells the executor
+        # nothing it needs.
         if not CRITIC_STEPWISE_ISOLATED:
             updates["messages"] = [
                 AIMessage(
@@ -927,9 +890,8 @@ def _stepwise_gate(
         return updates
 
     if resolved:
-        # Cleared without a model call. Recording them keeps the next pass from
-        # evaluating the same steps again, which is what would turn a declined
-        # review into a re-evaluation on every pass for the rest of the run.
+        # Cleared without a model call. Record them or every later pass re-evaluates
+        # the same steps.
         logger.info(
             "Critic gate: step(s) %s cleared without review (run %s)", resolved, run_id
         )
@@ -981,9 +943,7 @@ def _stepwise_brief(
     )
 
 
-# --------------------------------------------------------------------------
 # Invoking the critic
-# --------------------------------------------------------------------------
 
 
 def make_critic_agent_node(*, shared_agent, isolated_agent):
@@ -1197,10 +1157,8 @@ def _route_after_critic_gate(
     "execute_agent_followup",
     "plan_finalize",
 ]:
-    # Read from explicit flags, not by looking for the gate's message: on a
-    # later pass the previous round's message is still in the transcript with no
-    # user turn between, so scanning backwards would re-enter the critic after a
-    # gate that just declined.
+    # Read explicit flags, not the gate's message: the previous round's message is
+    # still in the transcript, so scanning back would re-enter a critic just declined.
     if state.get("critic_pending"):
         return "critic_agent"
     return _route_after_review(state)
@@ -1297,8 +1255,8 @@ def critic_review_node(state: AgentGraphState) -> dict[str, Any]:
     if verdict is None:
         # A critic that produced no readable verdict must not silently hold the
         # run back; the work stands and the failure is recorded. In step-wise
-        # mode the reviewed steps are marked seen even so — retrying the same
-        # call is how one broken verdict becomes an endless loop.
+        # mode the reviewed steps are marked seen even so, because retrying the
+        # same call is how one broken verdict becomes an endless loop.
         logger.warning("Critic returned no structured verdict; accepting the run.")
         updates: dict[str, Any] = {
             "critic_pending": False,
@@ -1315,9 +1273,8 @@ def critic_review_node(state: AgentGraphState) -> dict[str, Any]:
         scope = _int_list(state.get("critic_scope_steps"))
         reviewed = sorted(set(_int_list(state.get("critic_reviewed_steps"))) | set(scope))
         unresolved_after = _unresolved_steps(_load_review_run(state))
-        # The executor still has to be told what to do next. Saying nothing
-        # leaves it holding a step it handed back, waiting for a review that is
-        # not coming — the same silence that reads as "the run is over".
+        # The executor must still be told what to do next; silence leaves it holding
+        # a handed-back step, waiting for a review that is not coming.
         handoff = _handoff_message(
             state,
             reviews=reviews,
@@ -1367,8 +1324,7 @@ def _apply_full_run_verdict(
     blocking = [f for f in verdict.findings if f.severity == "blocking"]
     advisory = [f for f in verdict.findings if f.severity != "blocking"]
 
-    # Reopen the steps the critic rejected so the plan panel and the plan file
-    # both stop claiming work that did not hold up is finished.
+    # Reopen rejected steps so the panel and the plan file stop claiming them done.
     reopened: list[int] = []
     for finding in blocking:
         if finding.step <= 0:
@@ -1377,14 +1333,12 @@ def _apply_full_run_verdict(
             reopened.append(finding.step)
 
     accepted = verdict.decision == "accept" or not blocking
-    # Defensive: the gate refuses to invoke the critic once `critic_rounds`
-    # reaches the budget, so this should be unreachable. It exists so that a
-    # future change to the gate degrades into "report it unresolved" rather
-    # than into an unbounded critic ↔ executor loop against RECURSION_LIMIT.
+    # Unreachable: the gate stops invoking the critic at budget. Kept so a future
+    # gate change degrades into "unresolved" rather than an unbounded critic loop.
     exhausted = rounds > CRITIC_MAX_ROUNDS
 
-    # The gate left the reasons it fired in `critic_summary`; keep them, so the
-    # plan file records both why the run was reviewed and what came of it.
+    # Keep the gate's reasons from critic_summary: the plan file should record both
+    # why the run was reviewed and what came of it.
     triggered_by = _coerce_plan_text(state.get("critic_summary")).strip()
 
     if accepted:
@@ -1402,13 +1356,12 @@ def _apply_full_run_verdict(
             f"{_numbers(reopened)}"
         )
 
-    # The transcript shows the verdict; the plan file also records why the run
-    # was picked for review, which is what makes the gate tunable after the fact.
+    # The plan file also records why the run was picked, which makes the gate
+    # tunable after the fact.
     recorded = f"{triggered_by} → {summary}" if triggered_by else summary
 
-    # Advisory findings are never sent back to the executor, but they must not
-    # vanish — they belong in the report's Open Issues, so they stay on the
-    # transcript as the critic's own message.
+    # Advisory findings never go back to the executor but must not vanish: they
+    # stay on the transcript for the report's Open Issues.
     bullets = [f"- 🔴 **blocking** — {_finding_line(f)}" for f in blocking]
     bullets += [f"- 🟡 advisory — {_finding_line(f)}" for f in advisory]
 
@@ -1425,9 +1378,8 @@ def _apply_full_run_verdict(
         "structured_response": None,
     }
 
-    # Only open blocking findings are pinned. Advisory notes stay in the
-    # transcript; pinning them would keep instructing an executor that has
-    # nothing left to do about them.
+    # Pin only open blocking findings; pinned advisories would keep instructing an
+    # executor that can do nothing about them.
     if accepted or exhausted:
         updates["critic_findings"] = []
         updates["critic_next"] = "finalize"
@@ -1463,10 +1415,8 @@ def _apply_stepwise_verdict(
     unresolved_after_review = set(_int_list(state.get("critic_unresolved_steps")))
     attempts = _step_attempts(state)
 
-    # Terminal steps are fair game even when out of scope: a step accepted
-    # earlier that this review can show is wrong is exactly the cross-step
-    # defect a per-step review would otherwise miss. Steps that have not been
-    # attempted are not.
+    # Terminal steps are fair game even out of scope: an earlier step shown wrong
+    # is the cross-step defect per-step review would miss. Unattempted steps are not.
     reviewable = set(_terminal_steps(_load_review_run(state))) | set(scope)
     fallback = scope[0] if scope else 0
 
@@ -1477,10 +1427,8 @@ def _apply_stepwise_verdict(
     exhausted: list[tuple[int, CriticFinding]] = []
     premature: list[CriticFinding] = []
 
-    # Group by step first: one review pass is one attempt at a step, however
-    # many findings it left on it. Counted per finding instead, two findings on
-    # the same step would reopen it and then immediately spend its budget in the
-    # same pass, writing the step twice with contradictory statuses.
+    # Group by step: one pass is one attempt however many findings it left. Per
+    # finding, two on one step would reopen it and exhaust it in the same pass.
     grouped: dict[int, list[CriticFinding]] = {}
     for finding in blocking:
         target = finding.step if finding.step > 0 else fallback
@@ -1493,8 +1441,7 @@ def _apply_stepwise_verdict(
         key = str(target)
         attempts[key] = attempts.get(key, 0) + 1
         if attempts[key] > CRITIC_STEP_MAX_ROUNDS:
-            # Out of budget for this step. `blocked` is the honest status: the
-            # step is finished with, and it did not hold up.
+            # Out of budget; blocked is honest, since it is done and did not hold up.
             _write_step_status(
                 state, target, plan_store.BLOCKED, _group_note("Unresolved after review", group)
             )
@@ -1510,8 +1457,7 @@ def _apply_stepwise_verdict(
             revised.add(target)
             reviewed.discard(target)
         else:
-            # The file rejected the update (unknown step, or unwritable). Do not
-            # spend more passes on a step the plan cannot represent.
+            # Update rejected (unknown step, or unwritable); stop spending passes on it.
             logger.warning("Could not reopen step %s for review; leaving it as is", target)
             reviewed.add(target)
 
@@ -1519,12 +1465,9 @@ def _apply_stepwise_verdict(
     exhausted_steps = sorted({number for number, _ in exhausted})
     reviewed.update(number for number in scope if number not in reopened)
 
-    # Two destinations, and the split is what keeps the executor's flow clean.
-    # A finding is a *work item* exactly when a step was reopened for it; those
-    # go back in the handoff. Everything else — advisory notes, blocking
-    # findings whose step ran out of budget, objections about steps that have
-    # not started — is a *report item*, and is accumulated in state for the
-    # summary agent rather than handed to an executor that cannot act on it.
+    # A finding is a work item exactly when a step was reopened for it; those go
+    # back in the handoff. Everything else (advisories, exhausted steps, objections
+    # to unstarted steps) is a report item for the summary agent.
     pinned = [_finding_line(finding) for _, finding in sent_back][:CRITIC_FINDINGS_MAX]
     left_open = _merge_open_findings(
         state.get("critic_open_findings"),
@@ -1556,9 +1499,8 @@ def _apply_stepwise_verdict(
     else:
         headline = f"{scope_label} accepted"
 
-    # Read the plan back after the writes above: reopening a step is exactly what
-    # makes the run unfinished again, and both the handoff and the loop decision
-    # have to see that rather than the picture the review started from.
+    # Re-read the plan after the writes: reopening a step makes the run unfinished
+    # again, and the handoff and loop decision must see that, not the earlier state.
     unresolved_after = _unresolved_steps(_load_review_run(state))
     handoff = _handoff_message(
         state,
@@ -1716,11 +1658,9 @@ async def create_app(
 
     critic_agent_node = None
     if use_critic:
-        # Two critics behind one node. The full-run one shares the run's
-        # transcript, which is the right input when the run is one step long.
-        # The step-wise one is isolated: it is handed a case file per step and
-        # keeps nothing between reviews, so what it reads does not grow with the
-        # plan. `make_critic_agent_node` picks per run from `critic_mode`.
+        # Two critics behind one node: full-run shares the transcript (right when the
+        # run is one step long), step-wise is isolated on a per-step case file so its
+        # input does not grow with the plan. Picked per run from critic_mode.
         critic_agent_node = make_critic_agent_node(
             shared_agent=build_critic_agent(
                 critic_llm,
@@ -1774,8 +1714,8 @@ async def create_app(
         graph.add_node("critic_review", critic_review_node)
 
     if use_context_compression:
-        # Separate context_summary node per terminal branch so the graph stays acyclic
-        # and the per-branch streaming label remains meaningful.
+        # One node per terminal branch keeps the graph acyclic and the streaming
+        # label meaningful.
         graph.add_node("context_summary_simple", _compress_context)
         graph.add_node("context_summary_complex", _compress_context)
         graph.add_node("context_summary_meta", _compress_context)
@@ -1787,15 +1727,15 @@ async def create_app(
         _route_after_classifier,
         {
             "planning_agent": "planning_agent",
-            # Execution routes go through plan_init so every run is recorded in
-            # plan.md before any work starts, whatever route it took.
+            # All execution routes pass plan_init, so plan.md records the run before
+            # any work starts.
             "execute_agent_free": "plan_init",
             "execute_agent_followup": "plan_init",
             "summary_agent_meta": "summary_agent_meta",
         },
     )
 
-    # Complex branch: plan → human_chat → (revise loop | approve → execute_plan → summary_complex)
+    # Complex: plan → human_chat → (revise | approve → execute_plan → summary).
     graph.add_edge("planning_agent", "human_chat")
     graph.add_conditional_edges(
         "human_chat",
@@ -1807,8 +1747,7 @@ async def create_app(
     )
     graph.add_edge("approval_ack", "plan_init")
 
-    # Every execution route: plan_init (write + display) → execute → plan_finalize
-    # (reconcile + record outcome) → the branch's summary agent.
+    # Every execution route: plan_init → execute → plan_finalize → summary agent.
     graph.add_conditional_edges(
         "plan_init",
         _route_after_plan_init,
@@ -1821,18 +1760,13 @@ async def create_app(
     execute_nodes = ("execute_agent_plan", "execute_agent_free", "execute_agent_followup")
 
     if use_critic:
-        # Review sits on the execute → plan_finalize edge, before the outcome is
-        # recorded: put it after plan_finalize and plan.md would claim every
-        # step resolved for work the critic is about to reject. meta_query never
-        # traverses this edge, so it is exempt structurally rather than by a
-        # check — the concern that a critic taxes trivial requests is answered
-        # by placement for meta and by the deterministic gate for the rest.
+        # Review sits on execute → plan_finalize, before the outcome is recorded:
+        # after it, plan.md would claim steps resolved that the critic is about to
+        # reject. meta_query never traverses this edge, so it is exempt structurally.
         #
-        # The gate can also send the executor straight back without a review,
-        # which is what makes step-wise possible: on a complex run the executor
-        # resolves one step per pass, so most passes are "checked, carry on" and
-        # only the gate — not a model — is paid for them. `_route_after_review`
-        # is the single decision point behind both outgoing edges.
+        # The gate can also send the executor straight back unreviewed, which is what
+        # makes step-wise affordable: most passes are "checked, carry on" and cost only
+        # the gate. _route_after_review is the single decision point for both edges.
         execute_targets = {node: node for node in execute_nodes}
         for node in execute_nodes:
             graph.add_edge(node, "critic_gate")

@@ -131,9 +131,8 @@ def _interrupt_payloads(snapshot: Any) -> list[dict[str, Any]]:
             value = getattr(item, "value", item)
             if not isinstance(value, dict):
                 continue
-            # The same interrupt is reachable from both the snapshot and its
-            # pending task; key on content so it is counted once even when the
-            # two paths hand back distinct objects.
+            # Reachable from both the snapshot and its pending task; key on content
+            # so it counts once even when the two hand back distinct objects.
             key = json.dumps(value, sort_keys=True, default=str)
             if key in seen:
                 continue
@@ -164,8 +163,8 @@ async def read_pending_approval(
         return None
     payloads = _interrupt_payloads(snapshot)
     review = next((item for item in payloads if item.get("type") == "plan_review"), None)
-    # Paused at human_chat but without a readable payload: still an approval
-    # gate, so report one rather than leaving the user stuck with no affordance.
+    # Paused at human_chat with no readable payload: still an approval gate, so
+    # report one rather than leaving the user with no affordance.
     return review or (payloads[0] if payloads else {"type": "plan_review"})
 
 
@@ -200,12 +199,10 @@ async def stream_langgraph_events(
         "recursion_limit": RECURSION_LIMIT,
     }
 
-    # Binding the scope here only reaches consumers that iterate this generator
-    # with a plain `async for`. `run_controller` pumps it with a Task per
-    # `__anext__` (to race the file-refresh tick), and a Task starts from its own
-    # copy of the ambient context — so what is set here survives only the first
-    # event. That caller pins the scope into an explicit context instead; see
-    # `build_conversation_context`. Kept for direct consumers.
+    # Binding the scope here only reaches plain `async for` consumers. run_controller
+    # pumps this with a Task per __anext__, and each Task copies the ambient context,
+    # so this survives only the first event. That caller pins the scope into an
+    # explicit context instead (build_conversation_context). Kept for direct users.
     conversation_token = set_current_conversation_id(thread_id)
     user_token = set_current_user_id(user_id or app_config.user_id)
 
@@ -217,11 +214,9 @@ async def stream_langgraph_events(
 
     try:
         async with app_session(app_config) as app:
-            # `messages` carries token-level model output; `updates` carries what
-            # each node committed, including `__interrupt__`. `subgraphs=True` is
-            # what makes the react agents' events attributable: without it every
-            # event inside one is labelled `agent`/`tools` and the producing node
-            # has to be guessed from metadata strings.
+            # `messages` is token-level output, `updates` what each node committed
+            # (incl. __interrupt__). subgraphs=True makes react-agent events
+            # attributable; without it they are all labelled `agent`/`tools`.
             event_iterator = app.astream(
                 stream_input,
                 config=config,
@@ -238,8 +233,7 @@ async def stream_langgraph_events(
                     if not isinstance(data, dict):
                         continue
                     if "__interrupt__" in data:
-                        # In-band, so recovering the payload no longer depends on
-                        # a post-stream state read.
+                        # In-band, so the payload needs no post-stream state read.
                         for entry in tuple(data.get("__interrupt__") or ()):
                             value = getattr(entry, "value", entry)
                             if isinstance(value, dict):
@@ -249,10 +243,8 @@ async def stream_langgraph_events(
                         if not isinstance(update, dict) or not update.get("messages"):
                             continue
                         agent_name = _resolve_agent_name(namespace, None, node_name)
-                        # A node wrapping a subgraph re-emits every message that
-                        # subgraph produced. Those ids were already rendered from
-                        # the subgraph's own updates, so the timeline's id
-                        # de-duplication is what stops them appearing twice.
+                        # A node wrapping a subgraph re-emits all its messages; those
+                        # ids already rendered, so timeline id de-dup stops doubles.
                         yield ("chunk", {agent_name: {"messages": list(update["messages"])}})
                     continue
 
@@ -262,14 +254,12 @@ async def stream_langgraph_events(
                 message, metadata = data
                 agent_name = _resolve_agent_name(namespace, metadata or {})
 
-                # Completed messages from non-streaming nodes also arrive here,
-                # but the node's `updates` entry carries the same message, so
-                # they are left to that path rather than rendered twice.
+                # Non-streaming nodes' completed messages also arrive here, but their
+                # `updates` entry carries the same message, so leave them to that path.
                 if not isinstance(message, AIMessageChunk) or not STREAM_TOKENS:
                     continue
 
-                # Show text as it is generated instead of only when a whole model
-                # response completes. The completed message that follows replaces
+                # Stream text as generated; the completed message that follows replaces
                 # the accumulated text, so an unflushed remainder self-corrects.
                 text = _stream_chunk_text(message)
                 if not text:
@@ -295,19 +285,16 @@ async def stream_langgraph_events(
             interrupted = bool(streamed_interrupts)
             approval: Optional[dict[str, Any]] = None
             if streamed_interrupts:
-                # Captured in-band from the `updates` stream — no extra round
-                # trip to Postgres to find out why the run stopped.
+                # In-band from `updates`, so no Postgres round trip to learn why it stopped.
                 approval = next(
                     (item for item in streamed_interrupts if item.get("type") == "plan_review"),
                     streamed_interrupts[0],
                 )
             elif check_for_interrupts:
                 try:
-                    # Fallback for an interrupt that carried no readable payload.
-                    # Read the snapshot only after the stream iterator is done:
-                    # a persistent checkpointer may not have the checkpoint that
-                    # backs the interrupt visible until then, and would answer
-                    # with a stale, pre-interrupt state.
+                    # Fallback for an interrupt with no readable payload. Read the
+                    # snapshot only once the iterator is done: a persistent checkpointer
+                    # may not expose the backing checkpoint before then.
                     current_state = await app.aget_state(config)
                     if "human_chat" in tuple(getattr(current_state, "next", ()) or ()):
                         interrupted = True
@@ -354,8 +341,8 @@ def build_stream_input(
     if resume:
         return Command(resume=user_message)
 
-    # Tagged so the context layer can tell a new user turn apart from the
-    # HumanMessages that plan review writes into the same transcript.
+    # Tagged so the context layer tells a new user turn from the HumanMessages plan
+    # review writes into the same transcript.
     messages = [mark_user_request(message) for message in convert_to_messages([user_message])]
     payload: dict[str, Any] = {"messages": messages}
     if user_id:

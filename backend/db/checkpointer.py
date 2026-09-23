@@ -1,5 +1,3 @@
-"""LangGraph PostgreSQL checkpointer helpers."""
-
 from __future__ import annotations
 
 import asyncio

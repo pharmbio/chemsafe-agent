@@ -60,7 +60,6 @@ class FigureFeedback(BaseModel):
         }
 
 
-
 # Helper functions
 
 def _encode_image(figure_path: str) -> tuple[str, str]:
@@ -192,7 +191,7 @@ def figure_check(
 
     image_data, media_type = _encode_image(figure_path)
 
-    # Call LLM 
+    # Call LLM
     raw_evaluation = _call_llm(
         image_data=image_data,
         media_type=media_type,

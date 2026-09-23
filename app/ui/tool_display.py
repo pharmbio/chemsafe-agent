@@ -1,16 +1,3 @@
-"""Turning raw tool traffic into something a scientist can skim.
-
-A run makes dozens of tool calls. Rendered literally they are a wall of
-identical grey boxes labelled `python_executor`, and the reader has to open each
-one to find out what happened — including whether it failed. Here each call is
-reduced to a line that says what was done and how it went, with the raw detail
-still one click away.
-
-Two calls are dropped entirely: `plan_update` and `plan_status` exist to move
-the plan file, and the plan is shown live in its own panel, so echoing them into
-the transcript is noise that competes with the panel for attention.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -230,11 +217,9 @@ def render_tool_entry(
         else "<span class='tool-entry__mark tool-entry__mark--running'></span>"
     )
     body = "".join(part for part in (call_body, result_body) if part)
-    # Every entry starts collapsed, including failures. What went wrong is on
-    # the summary line — the ✕ mark and the error text — so nothing is hidden by
-    # the default; only the stack trace and the recovery hint are. Opening is
-    # the reader's decision, and auto-expanding failures made a run that
-    # recovered from several errors unfold into a wall of stack traces.
+    # All entries start collapsed, failures included: the ✕ and error text are on the
+    # summary line, so only the stack trace and recovery hint are hidden. Auto-expanding
+    # failures turned a run that recovered from several errors into a wall of traces.
     return (
         f"<details class='tool-entry tool-entry--{view.status}'>"
         "<summary>"

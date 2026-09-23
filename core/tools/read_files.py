@@ -17,8 +17,8 @@ from backend.utils.storage_paths import thread_data_root
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Extensions whose content is machine-generated or record-structured. Reading one
-# end to end is almost never how you get the answer out of it.
+# Machine-generated or record-structured content; reading one end to end is almost
+# never how you get the answer out.
 _STRUCTURED_KINDS = {
     ".csv": "CSV (delimited records)",
     ".tsv": "TSV (delimited records)",
@@ -96,7 +96,6 @@ def _assert_allowed_read_path(path: Path) -> None:
 
     if not _is_relative_to(resolved_path, REPO_ROOT.resolve()):
         raise PermissionError("Read access is limited to repository files and the active thread scope.")
-
 
 
 def _describe_kind(path: Path) -> str:

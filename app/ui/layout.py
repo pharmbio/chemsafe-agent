@@ -76,9 +76,8 @@ def build_demo() -> gr.Blocks:
                 file_refresh_timer = gr.Timer(
                     value=FILE_LIST_REFRESH_INTERVAL_SECONDS, active=True, render=False
                 )
-                # Starts disabled: `demo.load` enables it once auth resolves, and
-                # a button that is clickable for that first moment invites a
-                # click that can only produce "please sign in first".
+                # Starts disabled; demo.load enables it once auth resolves, so the
+                # first click cannot land on "please sign in first".
                 new_task_btn = gr.Button(
                     "New Task", interactive=False, elem_id="new-task-button"
                 )
@@ -91,10 +90,8 @@ def build_demo() -> gr.Blocks:
                     label="Conversation", height=560, type="messages", elem_id="chatbot-panel"
                 )
 
-                # The live plan. Sits directly under the transcript because
-                # "which step are we on" is the question a long run raises most
-                # often, and it used to be answerable only by expanding a
-                # collapsed `plan_update` tool result.
+                # The live plan, directly under the transcript: "which step are we
+                # on" is the question a long run raises most often.
                 progress_panel = gr.HTML(
                     value="", visible=False, elem_id="progress-panel", container=False
                 )

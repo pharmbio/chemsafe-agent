@@ -7,15 +7,11 @@ from core.tools.plan_tools import plan_status
 from core.tools.python_executor import python_executor
 from core.tools.read_files import read_files
 
-# Verification, not repair. The critic lands in the *executor's own* interpreter
-# session — sessions are keyed by `(user_id, conversation_id)` and every tool
-# reads that scope from contextvars — so it can print the value of a variable
-# the executor computed rather than trusting the transcript's account of it.
-# That is the difference between a critic that checks and one that opines.
+# Verification, not repair. The critic lands in the executor's own interpreter
+# session (keyed by (user_id, conversation_id), read from contextvars), so it can
+# print a variable the executor computed instead of trusting the transcript.
 #
-# It deliberately does not get `plan_update`. The critic supplies the verdict;
-# code applies it to the plan file, the same division used everywhere else in
-# the execution routine.
+# Deliberately no plan_update: the critic supplies the verdict, code applies it.
 CRITIC_TOOLS = [python_executor, read_files, plan_status]
 
 

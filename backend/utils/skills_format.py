@@ -60,4 +60,3 @@ def format_skill_summaries(skill_names: list[str]) -> str:
         metadata = read_skill_metadata(skill_name)
         lines.append(f'- `{metadata["skill_name"]}`: {metadata["description"]}')
     return "\n".join(lines)
-

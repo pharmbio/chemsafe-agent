@@ -1,17 +1,3 @@
-"""Config for the SOP RAG ensemble (BM25 + dense), production paths.
-
-Two ensemble modes share the same sparse (BM25) + dense (Chroma) topology;
-the dense engine is swappable:
-
-  mode="basic"          → MultiVectorRetriever + text-embedding-3-small
-  mode="parent_child"   → ParentDocumentRetriever + text-embedding-3-large
-                          (child chunk_size=400, overlap=50)
-
-At runtime the retriever reads from MEMORY_ROOT/sop_documents/<mode>/. Source
-databases live under analysis/rag_sop/ and are copied in by sop_indexer.py
-when (re)building the index.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,7 +13,7 @@ SOP_MEMORY_DIR = MEMORY_DIR / "sop_documents"
 # Original PDFs (used only for indexing pipelines upstream).
 SOP_DATA_DIR = REPO_ROOT / "analysis" / "rag_sop" / "SOPs"
 
-# --- Source locations (read-only, used by the copy step in sop_indexer) ---
+# Source locations (read-only, used by the copy step in sop_indexer)
 
 _ANALYSIS_ROOT = REPO_ROOT / "analysis" / "rag_sop"
 
@@ -54,7 +40,7 @@ PC_SOURCE_DOCSTORE_DIR = (
     _ANALYSIS_ROOT / "parent_child_rag_investigation" / "sop_documents" / "docstore"
 )
 
-# --- Local destinations (what the retriever actually reads) --------------
+# Local destinations (what the retriever actually reads)
 
 MODES = ("basic", "parent_child")
 
@@ -66,8 +52,7 @@ MODE_PATHS = {
         "bm25_corpus": SOP_MEMORY_DIR / "basic" / "bm25_corpus.pkl",
         "collection_name": "sop_rag",
         "embedding_model": "text-embedding-3-small",
-        # MultiVectorRetriever; docstore is a bare LocalFileStore whose values
-        # are JSON-encoded Documents.
+        # MultiVectorRetriever; docstore is a bare LocalFileStore of JSON Documents.
         "retriever_kind": "multivector",
     },
     "parent_child": {
@@ -79,8 +64,7 @@ MODE_PATHS = {
         "embedding_model": PC_EMBEDDING_MODEL,
         "chunk_size": PC_CHUNK_SIZE,
         "chunk_overlap": PC_CHUNK_OVERLAP,
-        # ParentDocumentRetriever; docstore wrapped via create_kv_docstore()
-        # so values are LangChain-serialized Documents.
+        # ParentDocumentRetriever; docstore wrapped via create_kv_docstore().
         "retriever_kind": "parent_document",
     },
 }

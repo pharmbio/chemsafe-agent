@@ -1,21 +1,3 @@
-"""Copy source RAG databases into MEMORY_ROOT and (re)build BM25 corpora.
-
-This indexer does not parse PDFs or call embeddings of its own. It copies the
-artifacts produced by sibling RAG pipelines under analysis/rag_sop/ and
-packages them with a per-mode BM25 corpus, under MEMORY_ROOT/sop_documents/.
-
-Modes
------
-basic         dense engine = basic_rag (MultiVectorRetriever, embedding=small).
-parent_child  dense engine = parent_child_rag winner (large, c400_o50).
-
-BM25 corpus
------------
-For each mode the corpus is the *parent* documents the dense retriever
-ultimately returns; both arms therefore carry the same doc_id metadata,
-which is required for EnsembleRetriever's id_key dedup to work.
-"""
-
 from __future__ import annotations
 
 import argparse

@@ -137,8 +137,8 @@ def conversation_panel_markup(state: UIState) -> str:
     for thread in state.thread_ids:
         thread_id = thread["thread_id"]
         is_active = thread_id == state.current_thread_id
-        # Files are rendered for the active card only. Clicking any other card activates that thread and re-renders, so a collapsed card's list is
-        # never actually read — and building them all made every sidebar
+        # Active card only: clicking another activates and re-renders it, so a
+        # collapsed card's list is never read, and building them all made every
         # refresh walk the filesystem once per conversation.
         body = _render_thread_files(state, thread_id) if is_active else ""
         cards.append(

@@ -58,8 +58,8 @@ def reset_user_state(state: UIState) -> None:
     state.running_threads = set()
     state.pending_approval = None
     state.stale_threads = set()
-    # Nothing has been sent to the new, signed-out panel yet, so the next render
-    # must emit it rather than compare against a previous user's markup.
+    # Nothing sent to the signed-out panel yet, so the next render must emit it
+    # rather than diff against a previous user's markup.
     state.last_panel_markup = None
     state.last_progress_markup = None
     state.last_run_at = {}
@@ -69,7 +69,7 @@ def reset_user_state(state: UIState) -> None:
     reset_chat_messages(state)
 
 
-# --- Conversations -----------------------------------------------------------
+# Conversations
 
 
 async def refresh_conversation(state: UIState, thread_id: str) -> None:
@@ -89,9 +89,8 @@ async def refresh_conversation(state: UIState, thread_id: str) -> None:
         record for record in state.thread_files.get(thread_id, []) if is_data_path(record.path)
     ]
 
-    # Restore the approval gate from the graph rather than clearing it, so a
-    # conversation paused for plan review is still resumable — and still says
-    # so — after a thread switch or a page reload.
+    # Restore the approval gate from the graph instead of clearing it, so a
+    # conversation paused for review stays resumable across switches and reloads.
     state.pending_approval = await read_pending_approval(thread_id)
 
 
@@ -122,9 +121,8 @@ async def sync_user_threads(state: UIState, ensure_one: bool = True) -> None:
     if state.selected_thread_id not in valid_ids:
         state.selected_thread_id = state.current_thread_id
 
-    # Only the conversation actually on screen is scanned. Walking every
-    # thread's directories here put an O(conversations) filesystem crawl on the
-    # login path and on the first message of every new conversation.
+    # Only the on-screen conversation is scanned; walking every thread put an
+    # O(conversations) filesystem crawl on login and on each new conversation.
     if state.current_thread_id:
         await refresh_conversation(state, state.current_thread_id)
     else:
@@ -138,8 +136,8 @@ async def activate_thread(thread_id: Optional[str], state: UIState):
     state.selected_thread_id = thread_id
     await refresh_conversation(state, thread_id)
     state.current_app_config = None
-    # Switching conversations clears the composer: text drafted for one thread
-    # reads as a mistake once another thread is on screen.
+    # Switching clears the composer: a draft for one thread reads as a mistake
+    # once another is on screen.
     return render(state, clear_input=True)
 
 
@@ -168,7 +166,7 @@ async def _delete_thread_action(thread_id: Optional[str], state: UIState):
     return render(state)
 
 
-# --- Gradio handlers ---------------------------------------------------------
+# Gradio handlers
 
 
 async def on_app_load():
@@ -258,7 +256,7 @@ async def on_logout(state: UIState):
     return render_auth(state)
 
 
-# --- Files -------------------------------------------------------------------
+# Files
 
 
 async def on_files_uploaded(files, state: UIState):

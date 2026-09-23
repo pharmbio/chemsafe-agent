@@ -1,5 +1,3 @@
-"""Shared async PostgreSQL connection pool with resilient reconnects."""
-
 from __future__ import annotations
 
 import asyncio

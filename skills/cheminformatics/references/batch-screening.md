@@ -1,14 +1,18 @@
-# Batch screening reference
+# Batch screening
 
-Pattern for running a compound list through Tier A and Tier B.
+A compound list through the structure operations in one pass, keeping the table
+honest about what failed: standardize first, compute everything from the
+canonical form, assemble one table.
 
-## Batch Screening Pattern
-
-Use to compare a small compound library on a fixed set of columns — useful for triage, similarity-based shortlist evaluation, and intermediate dossier tables.
+## The pattern
 
 ```python
 import pandas as pd
-from scripts.qsar_toolbox import calculate_chemical_safety
+from scripts.chem_standardize import standardize_molecules
+from scripts.chem_descriptors import describe_batch
+from scripts.chem_substructure import (
+    screen_alerts, build_filter_catalog, murcko_scaffold_smiles,
+)
 
 compounds = {
     "Aspirin":     "CC(=O)Oc1ccccc1C(=O)O",
@@ -19,41 +23,64 @@ compounds = {
     "TNT":         "Cc1c([N+](=O)[O-])cc([N+](=O)[O-])cc1[N+](=O)[O-]",
 }
 
-rows = []
-for name, smi in compounds.items():
-    try:
-        r     = calculate_chemical_safety(smi)
-        phys  = r["physicochemical"]
-        ghs   = r["ghs_classification"]
-        eco   = r["ecotoxicology"]
-        admet = r.get("admet_toxicity", {})
-        expl  = r["explosivity"]
-        rows.append({
-            "Name":           name,
-            "Formula":        phys["molecular_formula"],
-            "MW":             phys["mw"],
-            "logP":           phys["logp_crippen"],
-            "Signal word":    ghs["signal_word"],
-            "H-codes":        " ".join(h["H_code"] for h in ghs["hazard_statements"]),
-            "Fish LC50 mg/L": eco["fish_fathead_minnow"]["value_mg_L"],
-            "BCF L/kg":       eco["bioconcentration"]["BCF_L_per_kg"],
-            "Tm C":           r["melting_point"]["melting_point_C"],
-            "Explosivity":    expl["explosivity_risk_level"],
-            "AMES prob":      admet.get("AMES_mutagenicity_prob", "-"),
-            "hERG prob":      admet.get("hERG_inhibition_prob", "-"),
-            "LD50 mg/kg":     admet.get("LD50_oral_mg_per_kg", "-"),
-        })
-    except ValueError as e:
-        rows.append({"Name": name, "Error": str(e)})
+# 1. Standardize — one record per input, failures kept.
+std = dict(zip(compounds, standardize_molecules(list(compounds.values()))))
+failed = {name: record.notes for name, record in std.items() if not record.ok}
 
-df_batch = pd.DataFrame(rows).set_index("Name")
+# 2. Descriptors and catalog hits, computed from the canonical form.
+canonical = {name: record.canonical_smiles for name, record in std.items() if record.ok}
+catalog = build_filter_catalog(["pains", "brenk", "nih"])       # build once, outside any loop
+desc_rows = describe_batch(canonical)
+alert_rows = {row["name"]: row for row in screen_alerts(canonical, catalog=catalog)}
+
+# 3. One table.
+table = []
+for row in desc_rows:
+    name = row["name"]
+    alerts = alert_rows[name]
+    table.append({
+        "Name":             name,
+        "Canonical SMILES": std[name].canonical_smiles,
+        "InChIKey":         std[name].inchikey,
+        "Formula":          row["molecular_formula"],
+        "MW":               row["mw"],
+        "logP (calc.)":     row["logp_crippen"],
+        "TPSA":             row["tpsa"],
+        "HBD/HBA":          f'{row["hbd"]}/{row["hba"]}',
+        "Rot. bonds":       row["rotatable_bonds"],
+        "Stereocenters":    row["num_stereocenters"],
+        "Scaffold":         murcko_scaffold_smiles(std[name].canonical_smiles),
+        "Alert count":      alerts["num_alerts"],
+        "Alerts":           "; ".join(alerts["alerts"]) or "-",
+        "Error":            row["error"] or alerts["error"],
+    })
+
+df = pd.DataFrame(table).set_index("Name")
+print(f"{len(df)} of {len(compounds)} standardized; failures: {failed}")
 ```
 
-Rules:
+- **Report failures alongside the table** (`error` fields and `notes`), and
+  check the row count against the input count before writing it out.
+- **The canonical SMILES and InChIKey are the join keys** for every later table.
+- **An alert count is a triage signal, not a ranking.** Don't sort by it: hits
+  mean different things, and one catalog's hit is not comparable to another's.
+- **Reuse the standardized structures** rather than re-standardizing per
+  column.
 
-- **Catch `ValueError` per row** so a single unparseable SMILES does not abort the whole batch.
-- **Mixing draft GHS columns with experimental columns is dangerous** — if the table will be reviewed by a non-cheminformatician, prefix the predicted columns with `(predicted)` so a reader cannot mistake a draft for an authoritative classification.
-- **For large libraries (hundreds+),** vectorize the admet-ai call by passing a SMILES list directly to `ADMETModel.predict` rather than calling `calculate_chemical_safety` per row — the orchestrator's per-call loading is acceptable for triage but inefficient at scale.
+## Grouping a list
 
----
+For a set that needs organizing rather than tabulating:
 
+```python
+from scripts.chem_fingerprints import cluster_molecules, pick_diverse
+from scripts.chem_substructure import group_by_scaffold
+
+structures = list(canonical.values())
+groups   = group_by_scaffold(structures)              # exact, by Murcko scaffold
+clusters = cluster_molecules(structures, cutoff=0.6)  # fingerprint distance, centroid first
+subset   = pick_diverse(structures, 3)                # indices spread across the set
+```
+
+Scaffold grouping is exact and interpretable; clustering depends on the
+fingerprint and cutoff. Say which produced a grouping, with what settings
+(details in `molecular-algorithms.md`).

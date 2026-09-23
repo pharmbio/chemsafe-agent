@@ -39,8 +39,8 @@ SUMMARY_AGENT_NAME = "context_summary"
 SUMMARY_MEMORY_KEY = "summary_memory"
 PLANNING_AGENT_NAME = "planning_agent"
 SUMMARY_AGENT_PREFIX = "summary_agent"
-# Stamped on the HumanMessage that opens a user turn, so turn boundaries stay
-# unambiguous even next to the HumanMessages produced by plan review.
+# Stamped on the HumanMessage opening a user turn, so turn boundaries stay clear
+# next to the HumanMessages plan review produces.
 TURN_ROLE_KEY = "chemsafe_turn_role"
 TURN_ROLE_REQUEST = "user_request"
 
@@ -58,85 +58,62 @@ class AgentGraphState(AgentState, total=False):
     conversation_id: str
     plan_status: str
     task_category: str
-    # Pinned execution contract: survives context compression so the executor
-    # always sees exactly one authoritative plan instead of every draft.
+    # Pinned execution contract: survives compression so the executor sees exactly
+    # one authoritative plan, not every draft.
     approved_plan: str
     approval_constraints: List[str]
     # The plan lives on disk; state carries only a pointer and a progress line.
     plan_path: str
     plan_run_id: int
     plan_progress: str
-    # Critic review. Open blocking findings the executor still has to act on.
-    #
-    # How they *reach* the executor differs by mode. In `full_run` they are
-    # pinned like `approval_constraints`, so remediation instructions survive
-    # compression while the executor works through them. In `stepwise` they are
-    # delivered as the review handoff message instead — there is exactly one in
-    # the transcript at a time and it is removed once the step it concerns is
-    # settled — and this list is kept only so the loop routers and the next
-    # review's case file can read what is open. Cleared by `plan_init` and on an
-    # accepted verdict, so a later turn never re-executes against a finding that
-    # was already addressed.
+    # Open blocking findings the executor must still act on. full_run pins them like
+    # approval_constraints; stepwise delivers them as the handoff message instead and
+    # keeps this list only for the routers and the next case file. Cleared by
+    # plan_init and on an accepted verdict.
     critic_findings: List[str]
-    # Findings no execution pass will resolve: advisory notes, and blocking ones
-    # whose step ran out of revision budget. They are not instructions, so they
-    # are never sent back to the executor — but the report has to carry them
-    # into Open Issues, and in step-wise mode the verdict message that raised
-    # them is removed from the transcript, so state is the only thing that
-    # remembers.
+    # Findings no pass will resolve: advisories, and blocking ones out of budget.
+    # Never sent to the executor, but the report needs them in Open Issues, and in
+    # stepwise the message that raised them is gone, so state is the only record.
     critic_open_findings: List[str]
-    # Ids of the review handoff messages currently in the transcript. The
-    # step-wise flow keeps at most one: the next review removes it before
-    # posting its own, and `plan_finalize` clears whatever is left. Tracked
-    # rather than searched for because `RemoveMessage` raises on an id that is
-    # not there.
+    # Ids of handoff messages in the transcript; stepwise keeps at most one. Tracked
+    # rather than searched because RemoveMessage raises on an absent id.
     critic_feedback_ids: List[str]
-    # The gate's reasons for the review now pending, as "code: detail" lines.
-    # Passed forward instead of written into the transcript: the brief is the
-    # critic's input, not something the executor or the user needs to read.
+    # The gate's reasons for the pending review, as "code: detail" lines. Passed
+    # forward, not written to the transcript: it is the critic's input alone.
     critic_triggers: List[str]
-    # Where the evidence slice for the pending review starts — the watermark as
-    # it stood *before* this gate pass moved it. The gate consumes its own
-    # window; the critic node runs after and needs the same one.
+    # Start of the pending review's evidence slice: the watermark as it stood before
+    # this gate pass moved it, since the critic node needs the same window.
     critic_evidence_after_id: str
     critic_rounds: int
     critic_summary: str
-    # How this run is reviewed: "stepwise" (complex — each step checked as it
-    # resolves), "full_run" (simple/follow_up — one review of the finished run),
-    # or "" when the critic is off. Set by `plan_init` from the task category,
-    # so the mode is fixed for the whole run and cannot drift mid-loop.
+    # "stepwise" (each step checked as it resolves), "full_run" (one review of the
+    # finished run), or "" when the critic is off. Set by plan_init, fixed per run.
     critic_mode: str
-    # Set by the gate for exactly one routing decision. A flag rather than a
-    # scan for the gate's message: on a second pass the previous round's message
-    # is still in the transcript with no user turn between them.
+    # Set by the gate for one routing decision. A flag, not a transcript scan: the
+    # previous round's message is still there with no user turn between.
     critic_pending: bool
-    # Where the loop goes when no review is pending: "execute" (the executor
-    # gets another pass) or "finalize". Written by the gate and by the review
-    # node, read by the routers — both edges then agree by construction, and a
-    # run resumed from a checkpoint routes the way its own state says.
+    # Where the loop goes with no review pending: "execute" or "finalize". Written by
+    # the gate and review node so both edges agree, and a resumed run routes by state.
     critic_next: str
-    # Step-wise bookkeeping. `critic_reviewed_steps` is the watermark: a
-    # terminal step not listed here is new work to check, and the review node
-    # *removes* a step it reopens so the redone version is checked again.
+    # Stepwise watermark: a terminal step not listed is new work to check. The review
+    # node removes a step it reopens, so the redone version is checked again.
     critic_reviewed_steps: List[int]
     critic_scope_steps: List[int]
     critic_revised_steps: List[int]
     critic_unresolved_steps: List[int]
-    # Send-backs per step, keyed by step number as a string ("0" = the run as a
-    # whole). Per step rather than per run so one bad step cannot spend the
-    # revision budget the later steps need.
+    # Send-backs keyed by step number as a string ("0" = the whole run). Per step so
+    # one bad step cannot spend the budget later steps need.
     critic_step_attempts: Dict[str, int]
     critic_reviews: int
-    # Consecutive executor passes that resolved nothing new. The loop's only
-    # liveness guard: unresolved steps fall or this rises, so it terminates.
+    # Consecutive passes that resolved nothing new. The loop's only liveness guard:
+    # either unresolved steps fall or this rises, so it terminates.
     critic_stall: int
-    # Id of the last message the previous review saw, so the next step is judged
-    # on the traffic that produced it rather than on the whole turn.
+    # Last message the previous review saw, so the next step is judged on the traffic
+    # that produced it, not the whole turn.
     critic_watermark_id: str
-    # The verdict, between `critic_agent` and `critic_review`. Written by the
-    # full-run critic's `response_format` (it is a node, and a react agent may
-    # only write keys its `state_schema` knows about) and, in step-wise mode, by
-    # the node that invokes the isolated critic. Read once and cleared.
+    # The verdict, between critic_agent and critic_review. Written by the full-run
+    # critic's response_format, or by the node invoking the isolated stepwise critic.
+    # Read once and cleared.
     structured_response: Any
 
 
@@ -621,8 +598,8 @@ def build_pinned_context_block(state, messages: Sequence[BaseMessage], *, includ
                 + _shorten(goal, CONTEXT_GOAL_MAX_CHARS)
             )
 
-    # The plan itself lives in plan.md, not in the prompt. Only a pointer and a
-    # progress line are pinned; `plan_status` returns the authoritative copy.
+    # The plan lives in plan.md; only a pointer and progress line are pinned.
+    # plan_status returns the authoritative copy.
     plan_path = _coerce_text(state.get("plan_path"))
     if plan_path:
         plan_lines = [f"Execution plan for this conversation: {plan_path}"]
@@ -644,10 +621,9 @@ def build_pinned_context_block(state, messages: Sequence[BaseMessage], *, includ
             "corresponding plan steps:\n" + "\n".join(constraint_lines)
         )
 
-    # Step-wise review changes how the executor is expected to pace itself, so
-    # the fact that it is active has to survive compression. Only the fact and
-    # the accounting live here; the behaviour it implies is in the execute
-    # prompt, which is also the only agent the instruction applies to.
+    # Stepwise review changes the executor's pacing, so the fact that it is active
+    # must survive compression. Only the fact and accounting live here; the implied
+    # behaviour is in the execute prompt.
     stepwise = _coerce_text(state.get("critic_mode")) == "stepwise"
     if stepwise:
         review_lines = [
@@ -677,13 +653,9 @@ def build_pinned_context_block(state, messages: Sequence[BaseMessage], *, includ
             )
         sections.append("\n".join(review_lines))
 
-    # Review findings outrank the plan for as long as they are open: the step
-    # they name is not done, whatever the executor concluded the first time.
-    #
-    # Step-wise runs deliver them as the handoff message instead. Pinning them
-    # as well would put the same instruction in front of the executor twice,
-    # from two places that go stale at different moments — and the handoff is
-    # the one that says which of accept / send back / settled just happened.
+    # Open findings outrank the plan: the step they name is not done, whatever the
+    # executor concluded. Stepwise uses the handoff message instead; pinning as well
+    # would show the same instruction twice from sources that go stale separately.
     if not stepwise:
         finding_lines = [
             f"- {_shorten(str(item).strip(), CRITIC_FINDING_MAX_CHARS)}"
@@ -698,9 +670,8 @@ def build_pinned_context_block(state, messages: Sequence[BaseMessage], *, includ
                 + "\n".join(finding_lines)
             )
 
-    # Findings nothing is going to fix. Pinned for the whole run because the
-    # report has to carry them into Open Issues, and in step-wise mode the
-    # message that raised them has since been removed from the transcript.
+    # Findings nothing will fix. Pinned all run: the report needs them in Open
+    # Issues, and in stepwise the message that raised them is already gone.
     open_lines = [
         f"- {_shorten(str(item).strip(), CRITIC_FINDING_MAX_CHARS)}"
         for item in (state.get("critic_open_findings") or [])[:CRITIC_FINDINGS_MAX]

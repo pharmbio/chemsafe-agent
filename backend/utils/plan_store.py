@@ -97,9 +97,7 @@ class PlanDocument:
         return self.runs[-1] if self.runs else None
 
 
-# --------------------------------------------------------------------------
 # Parsing the planning agent's output into steps
-# --------------------------------------------------------------------------
 
 
 def parse_plan_steps(plan_text: str) -> List[PlanStep]:
@@ -169,9 +167,7 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-# --------------------------------------------------------------------------
 # Document rendering and parsing
-# --------------------------------------------------------------------------
 
 
 def render_step(step: PlanStep) -> List[str]:
@@ -275,9 +271,7 @@ def parse_document(text: str) -> PlanDocument:
     return document
 
 
-# --------------------------------------------------------------------------
 # File access
-# --------------------------------------------------------------------------
 
 
 def plan_file_path(

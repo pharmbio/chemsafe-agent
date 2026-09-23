@@ -7,11 +7,11 @@ from app.config import logger
 
 # Figures the caller saved explicitly, by id(). Never auto-captured.
 _explicitly_saved: Set[int] = set()
-# fignum -> owning session key, so one conversation never captures another's
-# figures out of matplotlib's process-global registry.
+# fignum -> owning session key, so no conversation captures another's figures out
+# of matplotlib's process-global registry.
 _figure_owner: Dict[int, str] = {}
-# fignum -> path already auto-saved, so re-capturing overwrites in place rather
-# than accumulating a new file per execution.
+# fignum -> path already auto-saved; re-capturing overwrites in place instead of
+# accumulating a file per execution.
 _figure_path: Dict[int, str] = {}
 _patched = False
 
@@ -44,8 +44,8 @@ def install() -> None:
             return original_savefig(self, *args, **kwargs)
 
         Figure.savefig = tracking_savefig
-        # Figures are deliberately left open so they stay editable across calls;
-        # suppress the "too many open figures" warning that would cause.
+        # Figures stay open to remain editable across calls; suppress the
+        # "too many open figures" warning that causes.
         matplotlib.rcParams["figure.max_open_warning"] = 0
         _patched = True
     except Exception as exc:  # pragma: no cover - matplotlib optional at import
@@ -102,9 +102,8 @@ def capture_unsaved_figures(
             continue  # nothing drawn yet
 
         path: Optional[str] = _figure_path.get(number)
-        # Already captured and untouched since: rendering it again would rewrite
-        # an identical file and repeat the note on every later call. matplotlib
-        # sets `stale` back to True as soon as the figure is edited.
+        # Captured and untouched since; re-rendering would rewrite an identical file
+        # and repeat the note. matplotlib re-sets `stale` as soon as it is edited.
         if path is not None and not getattr(figure, "stale", True):
             continue
         try:
@@ -112,12 +111,11 @@ def capture_unsaved_figures(
                 path = prepare_output_path(f"figure_{len(_figure_path) + 1}.png")
                 _figure_path[number] = path
             type(figure).savefig(figure, path, dpi=200, bbox_inches="tight")
-            # An auto-save must not count as an explicit one, or the figure would
-            # become permanently ineligible for re-capture after an edit.
+            # An auto-save must not count as explicit, or an edited figure becomes
+            # permanently ineligible for re-capture.
             _explicitly_saved.discard(id(figure))
-            # savefig leaves `stale` set, so mark the captured state ourselves.
-            # matplotlib flips it back to True on the next edit, which is exactly
-            # when the file is worth rewriting.
+            # savefig leaves `stale` set, so mark it captured here; matplotlib flips
+            # it back on the next edit, which is when rewriting is worth it.
             figure.stale = False
             saved.append(path)
         except Exception as exc:

@@ -13,7 +13,7 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-# Errors might happens, worth retrying
+# Transient errors worth retrying
 _RETRYABLE = (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError)
 
 
@@ -132,7 +132,8 @@ class ECHAClient:
         )
 
 
-    # Both the industry (CLP notification) and harmonised trees share the same URL shape, so route them through one helper.
+    # The industry (CLP notification) and harmonised trees share a URL shape, so
+    # route both through one helper.
     async def _cnl(self, tree, tail):
         return await self.get_json(f"/api-cnl-inventory/{tree}/{tail}")
 

@@ -1,5 +1,3 @@
-"""Database access helpers for authentication."""
-
 from __future__ import annotations
 
 import asyncio
