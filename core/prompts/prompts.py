@@ -8,6 +8,7 @@ EXECUTE_SKILLS = [
     "literature_search",
     "woe_reasoning",
     "cheminformatics",
+    "qsar_modelling",
     "similarity_search",
     "qprf_generating",
 ]
@@ -332,7 +333,7 @@ Answer the meta-query directly, accurately, and concisely.
 
 # AVAILABLE CAPABILITIES (FOR REFERENCE)
 
-The assistant supports chemical safety workflows backed by these skill areas: data inspection (uploaded files); database traversal (external chemical safety sources); data visualization (publication-style figures); SOP search (procedures, thresholds, PPE, disposal, emergencies); literature search; weight-of-evidence reasoning; and cheminformatics.
+The assistant supports chemical safety workflows backed by these skill areas: data inspection (uploaded files); database traversal (external chemical safety sources); data visualization (publication-style figures); SOP search (procedures, thresholds, PPE, disposal, emergencies); literature search; weight-of-evidence reasoning; cheminformatics (deterministic structure operations); and QSAR modelling (predicted activity endpoints).
 
 It runs a planning → human approval → execution → summary workflow for complex tasks, a lighter direct-execution path for simple ones, and a follow-up path that continues or refines work already done in the conversation without asking for a fresh plan approval.
 

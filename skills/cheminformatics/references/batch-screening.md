@@ -1,21 +1,17 @@
-# Batch screening reference
+# Batch screening
 
-Pattern for running a compound list through the deterministic structure
-operations in one pass. Every column below is computed from the structure —
-nothing here is a predicted endpoint. For predicted endpoints over a list, use
-the `qsar_modelling` skill, whose endpoint functions take a list or a CSV path
-directly.
+A compound list through the structure operations in one pass, keeping the table
+honest about what failed: standardize first, compute everything from the
+canonical form, assemble one table.
 
-## Batch Screening Pattern
-
-Use to compare a small compound library on a fixed set of columns — useful for triage, similarity-based shortlist evaluation, and intermediate dossier tables.
+## The pattern
 
 ```python
 import pandas as pd
-from scripts.cheminformatics import (
-    standardize_smiles, compute_descriptors,
-    build_filter_catalog, find_structural_alerts,
-    murcko_scaffold_smiles,
+from scripts.chem_standardize import standardize_molecules
+from scripts.chem_descriptors import describe_batch
+from scripts.chem_substructure import (
+    screen_alerts, build_filter_catalog, murcko_scaffold_smiles,
 )
 
 compounds = {
@@ -27,43 +23,64 @@ compounds = {
     "TNT":         "Cc1c([N+](=O)[O-])cc([N+](=O)[O-])cc1[N+](=O)[O-]",
 }
 
-catalog = build_filter_catalog(["pains", "brenk", "nih"])
+# 1. Standardize — one record per input, failures kept.
+std = dict(zip(compounds, standardize_molecules(list(compounds.values()))))
+failed = {name: record.notes for name, record in std.items() if not record.ok}
 
-rows = []
-for name, smi in compounds.items():
-    try:
-        std = standardize_smiles(smi)
-        if std.canonical_smiles is None:
-            raise ValueError(f"unparseable SMILES: {smi!r}")
-        desc  = compute_descriptors(std.canonical_smiles)
-        hits  = find_structural_alerts(std.canonical_smiles, catalog=catalog)
-        rows.append({
-            "Name":         name,
-            "Canonical":    std.canonical_smiles,
-            "InChIKey":     std.inchikey,
-            "Formula":      desc["molecular_formula"],
-            "MW":           desc["mw"],
-            "logP (est.)":  desc["logp_crippen"],
-            "TPSA":         desc["tpsa"],
-            "HBD/HBA":      f'{desc["hbd"]}/{desc["hba"]}',
-            "Rot. bonds":   desc["rotatable_bonds"],
-            "Stereocenters": desc["num_stereocenters"],
-            "Scaffold":     murcko_scaffold_smiles(std.canonical_smiles),
-            "Alert count":  len(hits),
-            "Alerts":       "; ".join(sorted({h["alert"] for h in hits})) or "-",
-        })
-    except ValueError as e:
-        rows.append({"Name": name, "Error": str(e)})
+# 2. Descriptors and catalog hits, computed from the canonical form.
+canonical = {name: record.canonical_smiles for name, record in std.items() if record.ok}
+catalog = build_filter_catalog(["pains", "brenk", "nih"])       # build once, outside any loop
+desc_rows = describe_batch(canonical)
+alert_rows = {row["name"]: row for row in screen_alerts(canonical, catalog=catalog)}
 
-df_batch = pd.DataFrame(rows).set_index("Name")
+# 3. One table.
+table = []
+for row in desc_rows:
+    name = row["name"]
+    alerts = alert_rows[name]
+    table.append({
+        "Name":             name,
+        "Canonical SMILES": std[name].canonical_smiles,
+        "InChIKey":         std[name].inchikey,
+        "Formula":          row["molecular_formula"],
+        "MW":               row["mw"],
+        "logP (calc.)":     row["logp_crippen"],
+        "TPSA":             row["tpsa"],
+        "HBD/HBA":          f'{row["hbd"]}/{row["hba"]}',
+        "Rot. bonds":       row["rotatable_bonds"],
+        "Stereocenters":    row["num_stereocenters"],
+        "Scaffold":         murcko_scaffold_smiles(std[name].canonical_smiles),
+        "Alert count":      alerts["num_alerts"],
+        "Alerts":           "; ".join(alerts["alerts"]) or "-",
+        "Error":            row["error"] or alerts["error"],
+    })
+
+df = pd.DataFrame(table).set_index("Name")
+print(f"{len(df)} of {len(compounds)} standardized; failures: {failed}")
 ```
 
-Rules:
+- **Report failures alongside the table** (`error` fields and `notes`), and
+  check the row count against the input count before writing it out.
+- **The canonical SMILES and InChIKey are the join keys** for every later table.
+- **An alert count is a triage signal, not a ranking.** Don't sort by it: hits
+  mean different things, and one catalog's hit is not comparable to another's.
+- **Reuse the standardized structures** rather than re-standardizing per
+  column.
 
-- **Catch `ValueError` per row** so a single unparseable SMILES does not abort the whole batch, and keep the failed rows in the table — a silently shorter table is a data-quality defect.
-- **Standardize before the descriptors** if the table will be compared across compounds or joined to a database lookup; the canonical SMILES and InChIKey columns are the join keys.
-- **`logP (est.)` is the Crippen estimate.** Label predicted or estimated columns as such — a reader must not mistake an RDKit estimate for a measured value.
-- **An alert count is a triage signal, not a ranking.** Do not sort a hazard shortlist by it; alerts differ in mechanistic weight and the classification call lives in `woe_reasoning`.
-- **To add predicted endpoints to a table like this**, run them through `qsar_modelling` separately and join on the canonical SMILES — those columns carry model error and an applicability-domain status that this table has no column for.
+## Grouping a list
 
----
+For a set that needs organizing rather than tabulating:
+
+```python
+from scripts.chem_fingerprints import cluster_molecules, pick_diverse
+from scripts.chem_substructure import group_by_scaffold
+
+structures = list(canonical.values())
+groups   = group_by_scaffold(structures)              # exact, by Murcko scaffold
+clusters = cluster_molecules(structures, cutoff=0.6)  # fingerprint distance, centroid first
+subset   = pick_diverse(structures, 3)                # indices spread across the set
+```
+
+Scaffold grouping is exact and interpretable; clustering depends on the
+fingerprint and cutoff. Say which produced a grouping, with what settings
+(details in `molecular-algorithms.md`).

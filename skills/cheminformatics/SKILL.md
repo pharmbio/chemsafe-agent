@@ -1,79 +1,97 @@
 ---
 name: cheminformatics
-description: Derive deterministic chemistry evidence from a molecular structure using RDKit — parse and standardize SMILES, InChI or InChIKey; compute physicochemical descriptors; screen structural alerts and toxicophores; run similarity, scaffold, MCS and read-across analogue selection; check the applicability domain; and draw molecules. Use when the input is a chemical structure and the answer must be computed from it. Everything it returns is reproducible from RDKit alone, never a measured value — for measured or regulatory data use database_traversal, and for predicted hazard endpoints use qsar_modelling.
+description: Operates on chemical structures with RDKit — parsing and interconverting SMILES, InChI, InChIKey, molblock and SDF; validating a structure and inventorying its stereochemistry, tautomers and fragments; standardizing, desalting and neutralizing it to a canonical identity; physicochemical descriptors, functional groups and property filters; SMARTS and built-in filter-catalog matching; fingerprint similarity, scaffolds, maximum common substructure and clustering; reaction templates; 3D conformers; structure figures. Use whenever a task involves a molecular structure and the answer is computed from the structure itself.
 ---
 
-# Cheminformatics Skill (RDKit)
+# Cheminformatics
 
-Produce structure-grounded evidence with RDKit. This skill is the structural-chemistry backbone for the agent: it feeds canonical identifiers into `database_traversal`, physchem descriptors into `woe_reasoning` Line 6, analogue pairs into RAAF read-across justifications, applicability-domain reports that gate QSAR reliance under OECD Principle 3, and structural-alert hits into the mechanistic line of evidence.
+Everything here is computed from the molecular graph with RDKit and is
+reproducible: the canonical SMILES and InChIKey other work joins on, descriptor
+tables, the substructure matches behind a structural argument, structure
+figures. Use the capabilities the task needs, in the order it implies — except
+that identity comparison, fingerprints, similarity and matching always run on
+inputs standardized with the same settings on every side (a salt against its
+parent, or two drawings of one tautomer, gives silently wrong numbers).
 
-Everything here is **deterministic**: computed from the structure itself and reproducible from RDKit alone. Nothing in this skill predicts a biological or hazard endpoint. Predicted endpoints live in `qsar_modelling`, and measured or regulatory values live in `database_traversal`.
+## Helpers
 
-The repo whitelists `rdkit` in `core/tools/python_executor.py::DEFAULT_AUTHORIZED_IMPORTS`. One curated helper module sits under `scripts/`:
+Import each from the module that owns it (there is no aggregate module), e.g.
+`from scripts.chem_standardize import standardize_smiles`. `chem_common` holds
+`to_mol` (input coercion) and `StructureError` (a `ValueError`). Prefer the
+helpers; drop to raw RDKit only for what they do not expose.
 
-- `cheminformatics.py` — parse, standardize, descriptors, alerts, similarity, scaffold/MCS, applicability domain, visualization.
+**Failure contract:**
 
-Prefer this helper over rewriting raw RDKit code; drop to raw RDKit only when it does not expose what you need.
+- `parse_*` returns `None` on unparseable input and `validate_structure`
+  explains why; always check the result.
+- Every other helper raises `StructureError` on input it cannot turn into a
+  molecule, so a mistake stops where it happens instead of becoming an empty
+  result that reads like an answer.
+- Batch helpers (`standardize_molecules`, `describe_batch`, `screen_alerts`)
+  never raise for a bad row: one record per input, with an `error` field.
 
-Bulky lookups — the full descriptor glossary and FilterCatalog citations — live in [`references/reference-tables.md`](references/reference-tables.md). Read that file when you need to interpret a helper's output or cite a catalog's provenance; you do not need it to call the helpers.
+**Files:** every writer (`write_sdf`, all `draw_*`) takes
+`output_name=prepare_output_path("name.ext")` and returns the path; a relative
+path raises.
 
-This document describes **capabilities**, not a procedure. Select the capabilities the task needs and call them in whatever order the task implies. The only ordering constraints are the *preconditions* called out on each capability (for example, similarity and identity comparisons require standardized inputs — see [Standardization](references/structure-ops.md#standardization-canonical-identity)).
+## Capability index
 
-## What this skill is not
+Each reference has signatures, return shapes, examples and rules. Load the one
+the step needs with `read_files("references/<name>.md")`.
 
-| You need                                         | Use instead            |
-|--------------------------------------------------|------------------------|
-| A measured value, a legal limit, a harmonised classification | `database_traversal`   |
-| A predicted hazard or activity endpoint          | `qsar_modelling`       |
-| The classification call itself                   | `woe_reasoning`        |
-| A documented QSAR prediction for a dossier       | `qprf_generating`      |
+| Capability | Module: helpers | Reference |
+|---|---|---|
+| Parse and interconvert | `chem_identity`: `parse_molecule`, `parse_smiles`, `parse_smarts`, `canonical_smiles`, `to_inchi`, `to_inchikey`, `to_molblock`, `identity_record` | representation |
+| Validate, inventory, compare | `chem_identity`: `validate_structure`, `stereo_summary`, `split_fragments`, `compare_structures` | representation |
+| Stereoisomers, tautomers | `chem_identity`: `enumerate_stereoisomers`, `enumerate_tautomers` | representation |
+| Structure files | `chem_identity`: `read_sdf`, `write_sdf` | representation |
+| 3D conformers, shape | `chem_geometry`: `generate_conformers`, `lowest_energy_conformer`, `descriptors_3d`, `conformer_rmsd` | representation |
+| Standardize, desalt, neutralize; parents | `chem_standardize`: `standardize_smiles`, `standardize_molecules`, `neutralize_charges`, `remove_salts`, `charge_parent`, `fragment_parent`, `canonical_tautomer` | standardization |
+| Descriptors | `chem_descriptors`: `compute_descriptors`, `compute_all_descriptors`, `describe_batch`, `element_counts` | descriptors |
+| Functional groups, property filters | `chem_descriptors`: `functional_groups`, `druglikeness_profile`, `lipinski_flags` | descriptors |
+| Fingerprints, similarity | `chem_fingerprints`: `fingerprint`, `morgan_fingerprint`, `similarity_between`, `similarity`, `nearest_neighbors`, `explain_morgan_bits` | molecular-algorithms |
+| Clustering, diversity | `chem_fingerprints`: `similarity_matrix`, `cluster_molecules`, `pick_diverse` | molecular-algorithms |
+| SMARTS matching | `chem_substructure`: `has_substructure`, `find_substructure_matches`, `count_substructure_matches`, `filter_by_substructure` | molecular-algorithms |
+| Filter catalogs | `chem_substructure`: `list_filter_catalogs`, `build_filter_catalog`, `find_structural_alerts`, `screen_alerts` | molecular-algorithms |
+| Scaffolds, ring systems, MCS | `chem_substructure`: `murcko_scaffold_smiles`, `generic_scaffold_smiles`, `group_by_scaffold`, `ring_systems`, `maximum_common_substructure` | molecular-algorithms |
+| Reactions, transformations | `chem_reactions`: `parse_reaction`, `reaction_info`, `run_reaction`, `apply_transform`, `enumerate_library`, `check_atom_balance`, `reaction_similarity` | reactions |
+| Structure figures | `chem_drawing`: `draw_molecule`, `draw_molecules`, `draw_reaction`, `draw_similarity_map` | visualization |
+| A compound list end to end | the batch helpers above | batch-screening |
 
-A descriptor is not an endpoint, and a structural alert is not a classification. This skill supplies the inputs those skills reason over; it never closes the argument itself.
+## Before reporting any value
 
----
-
-## Capability Index
-
-| Capability                                                 | Primary helper(s)                                                       |
-|------------------------------------------------------------|--------------------------------------------------------------------------|
-| [Parse SMILES / InChI](references/structure-ops.md#parsing-and-input-validation) | `parse_smiles`                                                           |
-| [Standardization (canonical identity)](references/structure-ops.md#standardization-canonical-identity) | `standardize_smiles`                                                     |
-| [Physchem descriptors](references/structure-ops.md#physchem-descriptors) | `compute_descriptors`, `lipinski_flags`                                  |
-| [Structural alerts (toxicophores)](references/structure-ops.md#structural-alerts-toxicophore-screening) | `build_filter_catalog`, `find_structural_alerts`, `match_custom_smarts`  |
-| [Similarity & analogue selection](references/structure-ops.md#similarity-and-analogue-selection) | `morgan_fingerprint`, `tanimoto`, `nearest_neighbors`                    |
-| [Scaffold & MCS](references/structure-ops.md#scaffold-and-mcs) | `murcko_scaffold_smiles`, `maximum_common_substructure`                  |
-| [Applicability domain (QSAR Principle 3)](references/structure-ops.md#applicability-domain-qsar-principle-3) | `applicability_domain_check`                                             |
-| [Visualization](references/structure-ops.md#visualization) | `draw_molecules`                                                         |
-| [Batch screening pattern](references/batch-screening.md)   | the helpers above, over a dict of SMILES                                 |
-
----
-
-## Where the detail lives
-
-Load only what the step needs; each reference carries the full call signatures,
-return shapes and worked examples.
-
-- `read_files("references/structure-ops.md")` — parsing, standardization,
-  descriptors, structural alerts, similarity and analogue selection, scaffold/MCS,
-  applicability domain, molecule drawing.
-- `read_files("references/batch-screening.md")` — running a compound list end to end.
-- `read_files("references/reference-tables.md")` — descriptor glossary and catalog provenance.
-
-Read the anti-patterns below before reporting any descriptor or alert.
-
-## Anti-Patterns (explicit don'ts)
-
-- **Don't compare unstandardized SMILES.** Standardize before every identity check, every cross-database lookup, and every similarity calculation.
-- **Don't neutralize or tautomer-canonicalize when it destroys the hazard-relevant species.** Quaternary ammoniums, permanent zwitterions, thione/thiol pairs with different reactivity.
-- **Don't strip stereochemistry.** Enantiomers and E/Z isomers often differ in activity; strip and you have reported on a different substance.
-- **Don't treat an alert hit as a classification.** Alerts are mechanistic indications; classifications require `woe_reasoning` integration.
-- **Don't use Lipinski / Veber / Egan / Ghose / QED flags as hazard criteria.** They are drug-likeness filters.
-- **Don't report a descriptor as a measured value.** `logp_crippen` is an estimate; if `database_traversal` has an experimental logP, that is the value for the evidence table.
-- **Don't treat Tanimoto ≥ 0.85 as a RAAF justification on its own.** RAAF requires mechanistic + metabolic similarity too.
-- **Don't hand-roll SMARTS for alerts that `FilterCatalog` already provides.** Use the built-ins; reserve custom SMARTS for regulator-specific alerts with cited sources.
-- **Don't write custom SMARTS without citing the authoritative source.** Unsourced alerts are non-reproducible.
-- **Don't silently fall back to another input** when a SMILES fails to parse. Record the failure and either fix the input or stop.
-- **Don't let an `applicability_domain_check` result stand in for a model's own domain report.** It scores similarity to a reference set you supply; `qsar_modelling` endpoints carry their own conformal AD signal, and both belong in the record under OECD Principle 3.
-- **Do not create hallucinations** about predicted or calculated values. Only data obtained through a predictive model, the use of codes, or bibliographic research are valid.
-
----
+- **Don't standardize past the species you are reasoning about.** The default
+  pipeline turns cisplatin into `[Pt+4]` and a ferrocyanide salt into `C#N`:
+  check `validate_structure` for `metal_atoms` and `is_mixture` first and use
+  the standardization decision table.
+- **Don't strip stereochemistry to make something match** — enantiomers and E/Z
+  isomers are different substances. After any rewrite, check
+  `compare_structures(before, after)["stereocenters_lost"]`.
+- **Don't treat an unspecified stereocenter as absent.** The input names a set
+  of isomers; say which one the work is about.
+- **Quote a similarity with its fingerprint and metric** ("Tanimoto 0.42 on
+  ECFP4/2048", never "similarity 0.42"), and never compare values across
+  fingerprint kinds, radii or sizes.
+- **Check `timed_out` before reporting an MCS** — a timed-out search returns the
+  best core so far, not the maximum.
+- **A filter-catalog hit is only a substructure match**: a named pattern
+  occurs, how often and where. Carry the entry's `reference` with it; no hit
+  means only that no pattern in the chosen sets matched.
+- **Don't hand-roll SMARTS a built-in catalog already provides**, or use a
+  pattern encoding a published rule without citing its source.
+- **A shared scaffold is not interchangeability** — the scaffold discards the
+  peripheral groups that drive reactivity.
+- **Drug-likeness filters describe library design only** — Lipinski, Veber,
+  Egan, Ghose and QED measure oral-drug-like appearance.
+- **Label calculated descriptors as calculated.** `logp_crippen` is an
+  atom-contribution estimate; prefer a measured value where one exists.
+- **Don't trust a reaction template until it has matched.** Check
+  `reaction_info` for mapping errors and `result.reacted` before saying
+  anything about products.
+- **A generated conformer is one sampled geometry** from a stochastic
+  embedding, not the structure; quote the method, force field, seed and
+  conformer.
+- **Record every failed input** — `parse_*` returning `None`, a raised
+  `StructureError` and a batch row's `error` are findings, not rows to drop.
+- **Report only values this skill computed**, from a call actually made on the
+  exact structure named.
