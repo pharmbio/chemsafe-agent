@@ -32,7 +32,7 @@ from app.ui.conversation_panel import append_file_paths
 FILE_LIST_REFRESH_INTERVAL_SECONDS = 1.0
 
 
-# --- Event application -------------------------------------------------------
+# Event application
 
 
 def parse_complete_payload(payload: Any) -> Tuple[bool, Optional[Dict[str, Any]], Optional[datetime]]:
@@ -69,8 +69,8 @@ def apply_stream_event(event_type: str, payload: Any, state: UIState) -> bool:
     if event_type == "complete":
         _, approval, _ = parse_complete_payload(payload)
         state.pending_approval = approval
-        # Resolve the live spinner on the last agent block once the run settles
-        # (either fully done or paused for plan approval).
+        # Resolve the live spinner on the last agent block once the run settles,
+        # whether it finished or paused for plan approval.
         finalize_active_blocks(state)
         return True
     return False
@@ -86,7 +86,7 @@ def record_stream_error(state: UIState, exc: Exception) -> bool:
     return append_error_block(state, message, title="Run interrupted", detail=detail)
 
 
-# --- Concurrency -------------------------------------------------------------
+# Concurrency
 
 _thread_locks: Dict[str, asyncio.Lock] = {}
 _thread_locks_guard = asyncio.Lock()
@@ -137,8 +137,8 @@ def _spawn(coro, context: Optional[contextvars.Context]):
         try:
             return asyncio.get_running_loop().create_task(coro, context=context)
         except TypeError:
-            # `context=` on create_task needs Python 3.11+. Older runtimes lose
-            # the pinned scope, which the graph state still carries.
+            # context= on create_task needs 3.11+; older runtimes lose the pinned
+            # scope, which the graph state still carries.
             logger.debug("create_task(context=...) unsupported; falling back")
     return asyncio.ensure_future(coro)
 
@@ -182,7 +182,7 @@ async def _events_with_ticks(
                 await task
 
 
-# --- The run -----------------------------------------------------------------
+# The run
 
 
 async def _prepare_submission(prompt: str, state: UIState) -> Tuple[Optional[str], bool]:
@@ -200,11 +200,10 @@ async def _prepare_submission(prompt: str, state: UIState) -> Tuple[Optional[str
     if not prompt:
         return None, False
 
-    # Whether this message resumes a pending approval is decided by the graph,
-    # never by session state: the UI's copy is reset by thread switches and page
-    # reloads, and is never set at all when the interrupt lands while the user
-    # is viewing another thread. Sending plain input to an interrupted thread
-    # makes LangGraph restart from START and re-plan.
+    # The graph decides whether this resumes a pending approval, never session state:
+    # the UI's copy is lost on thread switches and reloads, and is never set when the
+    # interrupt lands off-thread. Plain input to an interrupted thread restarts
+    # LangGraph from START and re-plans.
     resume = await read_pending_approval(thread_id) is not None
 
     final_prompt = prompt if resume else append_file_paths(prompt, state)
@@ -245,14 +244,12 @@ async def _stream_run(prompt: str, state: UIState):
     attached = True
     stopped = False
 
-    # An explicit context carrying this run's output scope. Each `__anext__`
-    # below is wrapped in a Task so it can race the tick timer, and a Task
-    # copies the ambient context when it is created — so scope set *inside* the
-    # streaming generator lives only in the first task's copy, and from the
-    # second event on every tool call falls back to
-    # `anonymous-user`/`default-thread`. Pinning one context and spawning every
-    # task in it makes the scope independent of whatever the outer layers
-    # (Gradio's queue included) do to the ambient context between yields.
+    # Explicit context carrying this run's output scope. Each __anext__ below is
+    # wrapped in a Task to race the tick timer, and a Task copies the ambient context
+    # at creation, so scope set *inside* the generator survives only the first event,
+    # after which tool calls fall back to anonymous-user/default-thread. Pinning one
+    # context and spawning every task in it makes the scope independent of what the
+    # outer layers (Gradio's queue included) do between yields.
     run_context = build_conversation_context(state.user_id, thread_id)
 
     stream = stream_langgraph_events(
@@ -277,9 +274,8 @@ async def _stream_run(prompt: str, state: UIState):
 
             viewing = (state.selected_thread_id or state.current_thread_id) == thread_id
             if viewing and not attached:
-                # The user came back. Adopt whatever the detached buffer
-                # recorded while they were away, then keep writing to session
-                # state again.
+                # The user came back: adopt what the detached buffer recorded while
+                # they were away, then resume writing to session state.
                 await _reattach(state, thread_id, writer)
                 attached = True
                 yield render(state)
@@ -303,19 +299,17 @@ async def _stream_run(prompt: str, state: UIState):
 
             if attached:
                 if apply_stream_event(event_type, payload, state):
-                    # Token events are display-only: the completed message
-                    # arrives moments later and is what gets persisted. Writing
-                    # a snapshot and rescanning files every ~120ms during
-                    # generation would cost more than it shows — and so would
-                    # redrawing the side panels, which `live=True` leaves alone.
+                    # Token events are display-only; the completed message is what
+                    # persists. Snapshotting and rescanning files every ~120ms would
+                    # cost more than it shows, as would redrawing the side panels.
                     is_token = event_type == "token"
                     if not is_token:
                         await timeline_store.persist(thread_id, state)
                         refresh_thread_files(state, thread_id)
                     yield render(state, live=is_token)
             elif event_type != "token":
-                # Nobody is watching, so tokens are pure cost: the completed
-                # message carries the same text.
+                # Nobody is watching, so tokens are pure cost: the completed message
+                # carries the same text.
                 detached = await writer.state()
                 if apply_stream_event(event_type, payload, detached):
                     writer.mark_dirty()
@@ -400,7 +394,7 @@ async def run_user_message(prompt: str, state: UIState):
             yield update
 
 
-# --- Handlers ----------------------------------------------------------------
+# Handlers
 
 
 async def on_send_message(prompt: str, state: UIState):

@@ -4,7 +4,6 @@ from core.agents.context import AgentGraphState
 from core.prompts.prompts import PLANNING_AGENT_SYSTEM_PROMPT
 
 
-
 def build_planning_agent(
     llm,
     pre_model_hook=None,

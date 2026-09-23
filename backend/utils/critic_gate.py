@@ -1,36 +1,3 @@
-"""Deciding whether the critic runs — deterministically, in code.
-
-The critic is expensive; deciding whether to invoke it must not be. This module
-is the gate: pure functions over the plan file and the current turn's messages,
-returning the list of reasons a run is worth reviewing. No LLM is involved.
-
-Why not let a model decide. Asking the executor whether its work needs review is
-self-assessment, and the premise of having a critic at all is that the
-executor's own account of its work is what we do not trust. Asking a *separate*
-model means paying a model call to decide whether to pay a model call, over a
-long transcript, unreliably. So the gate keys on evidence that is observable
-without judgement: unresolved steps, tool failures, missing artifacts, and —
-the one that earns the critic's place in this system — a numeric exposure limit
-stated without any SOP retrieval behind it.
-
-This mirrors how the rest of the execution routine is built: structure and
-accounting in code, judgement from the model. `plan_init` parses, `plan_update`
-validates, `plan_finalize` reconciles; the gate decides, and only the critique
-itself is a model call.
-
-Two entry points, one per review mode:
-
-- `evaluate()` — full-run review, used by `simple` and `follow_up`. Looks at the
-  whole turn plus the finished plan run.
-- `evaluate_steps()` — step-wise review, used by `complex`. Looks at one or more
-  steps that just reached a terminal status, and only at the traffic that
-  produced them. Scoping matters: judged against the whole turn, step 1's
-  recovered failure would re-flag every later step for the rest of the run.
-
-Both share the same message scan, so a trigger means the same thing in either
-mode and the codes stay comparable across the trial.
-"""
-
 from __future__ import annotations
 
 import json
@@ -52,18 +19,16 @@ class CriticTrigger:
         return f"{self.code}: {self.detail}"
 
 
-# Names that appear in a python_executor call when SOP grounding actually
-# happened. `sop_search` is a skill script, not a tool, so grounding is visible
-# in the code the executor ran rather than in a tool name.
+# Names appearing in a python_executor call when SOP grounding happened. sop_search
+# is a skill script, not a tool, so grounding shows in the code, not a tool name.
 _SOP_EVIDENCE = re.compile(
     r"sop_search|get_sop_retriever|EnsembleSOPRetriever|sop_documents",
     re.IGNORECASE,
 )
 
-# An occupational-limit or toxicity value in play — asserted in the agent's own
-# text, or printed by `python_executor`. Deliberately broad: a false positive
-# costs one critic pass, a false negative ships an ungrounded exposure number,
-# which is the failure this whole system exists to prevent.
+# An exposure or toxicity value in play, in the agent's text or python_executor
+# output. Deliberately broad: a false positive costs one critic pass, a false
+# negative ships an ungrounded exposure number.
 _LIMIT_ASSERTION = re.compile(
     r"\b(?:oel|twa|stel|pel|tlv|rel|idlh|ld50|lc50|ec50|ic50|noael|loael|dnel|pnec|mak|aegl)\b"
     r"|\d+(?:\.\d+)?\s*(?:mg|µg|ug|ng)\s*(?:/|·|\s)\s*m\s*(?:³|3)\b"
@@ -136,10 +101,9 @@ def _call_source(call: dict) -> str:
     return str(args or "")
 
 
-# Messages the gate must not read as evidence about the run. The gate's own
-# brief and the critic's verdict quote the very things the patterns look for
-# ("an exposure limit was stated with no SOP retrieval"), so scanning them would
-# make the previous review the reason for the next one.
+# Not evidence about the run: the gate's brief and the critic's verdict quote the
+# very phrases the patterns match, so scanning them would make the previous review
+# the reason for the next one.
 _NON_EVIDENCE_AUTHORS = frozenset(
     {"critic_gate", "critic_review", "plan_init", "plan_finalize"}
 )
@@ -182,12 +146,10 @@ def _scan(messages: Sequence[Any]) -> _Evidence:
             body = _text(getattr(message, "content", None))
             if _SOP_EVIDENCE.search(body):
                 sop_grounded = True
-            # A limit the run is working with usually arrives here rather than in
-            # the agent's prose: it was printed, or a database returned it. The
-            # scan is confined to `python_executor` output because that is a
-            # value the run computed or retrieved — a `read_files` result is a
-            # document being read, and every SOP and playbook in this domain is
-            # full of the same words.
+            # Limits usually arrive here rather than in prose, either printed or
+            # returned by a database. Confined to python_executor: that is a value the
+            # run computed; a read_files result is just a document, and every SOP in
+            # this domain is full of the same words.
             if name == "python_executor" and _LIMIT_ASSERTION.search(body):
                 asserted_limit = True
             continue
@@ -243,9 +205,8 @@ def _evidence_triggers(
             CriticTrigger("unverified_marker", f"an UNVERIFIED flag was emitted {where}")
         )
 
-    # The one that matters most in this domain, and the reason the critic is not
-    # exempted on `simple`: "what is the OEL for toluene?" routes as a simple
-    # one-step run, and an ungrounded number there is exactly the dangerous case.
+    # Why `simple` is not exempt: "what is the OEL for toluene?" is a one-step run,
+    # and an ungrounded number there is exactly the dangerous case.
     if evidence.asserted_limit and not evidence.sop_grounded:
         triggers.append(
             CriticTrigger(
@@ -268,8 +229,7 @@ def _evidence_triggers(
 def _constraint_trigger(
     approval_constraints: Iterable[str],
 ) -> Optional[CriticTrigger]:
-    # A conditional approval is precisely the case where a human attached a
-    # requirement that can be silently dropped somewhere in the middle.
+    # A conditional approval is where a human requirement can be silently dropped.
     conditions = [str(item).strip() for item in approval_constraints if str(item).strip()]
     if not conditions:
         return None
@@ -295,7 +255,7 @@ def evaluate(
     """
     triggers: List[CriticTrigger] = []
 
-    # --- Signals from the plan file -----------------------------------------
+    # Signals from the plan file
     if run is not None and run.steps:
         blocked = [s for s in run.steps if s.status == "blocked"]
         unresolved = [s for s in run.steps if not s.is_terminal]
@@ -324,7 +284,7 @@ def evaluate(
     if constraint is not None:
         triggers.append(constraint)
 
-    # --- Signals from this turn's traffic -----------------------------------
+    # Signals from this turn's traffic
     triggers.extend(
         _evidence_triggers(
             _scan(turn_messages), failure_trigger=failure_trigger, scope="this run"
@@ -359,9 +319,8 @@ def evaluate_steps(
     listed = ", ".join(str(number) for number in step_numbers)
     scope = f"step {listed}" if len(step_numbers) == 1 else f"steps {listed}"
 
-    # How the executor left each step is a signal in its own right: a step it
-    # abandoned or waved through is exactly the kind the plan file will
-    # otherwise carry as settled.
+    # How the executor left each step is itself a signal: one it abandoned or waved
+    # through is what the plan file would otherwise carry as settled.
     if run is not None:
         for number in step_numbers:
             step = run.step(number)

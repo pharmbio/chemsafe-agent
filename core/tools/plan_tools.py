@@ -1,11 +1,3 @@
-"""Tools for reading and advancing the on-disk execution plan.
-
-These replace the prose TRACKING block. The agent supplies only a step number,
-a status and an optional note; the file mutation, validation, timestamping and
-the ledger rendered back are all done here, so progress reporting cannot drift
-from what actually happened.
-"""
-
 from __future__ import annotations
 
 from typing import Optional

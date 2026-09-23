@@ -12,4 +12,3 @@ class AppRunConfig:
     conversation_id: str
     use_context_compression: bool = True
     use_critic: bool = CRITIC_ENABLED
-

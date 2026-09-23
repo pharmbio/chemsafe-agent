@@ -44,20 +44,17 @@ class UIState:
     processed_tools_ids: Set[str] = field(default_factory=set)
     processed_content_hashes: Set[int] = field(default_factory=set)
     streaming_message_lookup: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    # The payload the graph passed to `interrupt()` while paused for plan
-    # review, or None when nothing is waiting on the user. This replaces a pair
-    # of booleans that were always assigned the same value and never read by
-    # anything that rendered, so the approval gate was invisible.
+    # The payload the graph passed to interrupt() while paused for plan review,
+    # or None when nothing awaits the user.
     pending_approval: Optional[Dict[str, Any]] = None
     # Threads that produced output while the user was looking elsewhere.
     stale_threads: Set[str] = field(default_factory=set)
-    # The sidebar markup this session was last *sent*. Re-sending identical
-    # markup replaces the panel's DOM and discards the user's scroll position,
-    # so it is compared before being emitted. None means "nothing sent yet",
-    # which must force a send — reset it whenever the panel has to be redrawn.
+    # Sidebar markup last *sent*. Re-sending identical markup replaces the panel's
+    # DOM and loses the user's scroll, so compare before emitting. None means
+    # "nothing sent yet" and forces a send, so reset it to force a redraw.
     last_panel_markup: Optional[str] = None
-    # Same treatment for the plan panel: it is a `gr.HTML` too, and it holds a
-    # `<details>` the user can collapse, which a re-send would spring open again.
+    # Same for the plan panel: also gr.HTML, and it holds a <details> the user can
+    # collapse that a re-send would spring open.
     last_progress_markup: Optional[str] = None
     thread_files: Dict[str, List[FileRecord]] = field(default_factory=dict)
     uploaded_files: List[FileRecord] = field(default_factory=list)

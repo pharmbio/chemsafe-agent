@@ -52,8 +52,7 @@ def render(
         changes_btn,
         send_btn,
         stop_btn,
-        # Read straight from plan.md, so the panel cannot disagree with the file
-        # that is the actual record of progress.
+        # Read straight from plan.md so the panel cannot disagree with the record.
         gr.skip() if live else progress_update(state),
     )
 

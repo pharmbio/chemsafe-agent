@@ -14,9 +14,8 @@ from app.ui.chat_timeline import (
 
 TIMELINE_STATE_VERSION = 1
 
-# How long a detached run may buffer timeline changes before writing them.
-# Every event used to cost a load + full rebuild + save round trip; a long run
-# with nobody watching turned into hundreds of those.
+# How long a detached run may buffer timeline changes before writing. Every event
+# used to cost a load + rebuild + save round trip, hundreds over a long run.
 DETACHED_FLUSH_SECONDS = 2.0
 
 

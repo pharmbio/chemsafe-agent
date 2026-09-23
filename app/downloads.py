@@ -22,15 +22,11 @@ from backend.utils.storage_paths import thread_data_root
 FILES_ROUTER = APIRouter(prefix="/api/files")
 DOWNLOAD_ROUTE = "/api/files/download"
 
-# A link is minted inside a time bucket rather than at the exact second, so the
-# same file produces the *same* token for the whole bucket. Without this the
-# sidebar markup changed every second even when the file list had not — 10.8% of
-# it churned — which replaced the panel's DOM and threw away the user's scroll
-# position on every streamed event.
-#
-# The TTL is sized so the quantisation cannot shorten a link's life below what it
-# was before: a token minted at the very end of a bucket still has
-# TTL - BUCKET = 600s left, which is exactly the old fixed lifetime.
+# Links are minted per time bucket, not per second, so a file yields the same token
+# all bucket. Otherwise the sidebar markup churned every second even with an
+# unchanged file list, replacing the panel's DOM and losing the user's scroll.
+# The TTL is sized so quantisation cannot shorten a link's life: minted at the end
+# of a bucket it still has TTL - BUCKET = 600s, the old fixed lifetime.
 DOWNLOAD_TOKEN_BUCKET_SECONDS = 300
 DOWNLOAD_TTL_SECONDS = 900
 
@@ -78,9 +74,9 @@ def encode_download_token(payload: Dict[str, Any]) -> str:
 
 
 def decode_download_token(token: str) -> Dict[str, Any]:
-    # Everything up to the signature check runs on attacker-controlled input:
-    # bad base64 padding, non-UTF-8 bytes and non-object JSON all raise, and an
-    # uncaught raise here is a 500 on a request that is simply malformed.
+    # Everything before the signature check runs on attacker-controlled input; bad
+    # padding, non-UTF-8 bytes and non-object JSON all raise, and an uncaught raise
+    # is a 500 on a merely malformed request.
     try:
         body_part, sig_part = token.split(".", 1)
         body = _urlsafe_b64decode(body_part)
@@ -120,8 +116,8 @@ def build_download_payload(
     resolved_path = safe_resolve(record.path)
     if not is_allowed_download_path(resolved_path):
         return None
-    # Quantised to the bucket, so re-rendering the sidebar reproduces a
-    # byte-identical token and the panel can be skipped instead of replaced.
+    # Quantised to the bucket so re-rendering reproduces a byte-identical token and
+    # the panel can be skipped rather than replaced.
     issued_at = (int(time.time()) // DOWNLOAD_TOKEN_BUCKET_SECONDS) * DOWNLOAD_TOKEN_BUCKET_SECONDS
     return {
         "path": str(resolved_path),

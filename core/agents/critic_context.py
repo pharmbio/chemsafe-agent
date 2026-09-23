@@ -1,36 +1,3 @@
-"""The step-wise critic's context, built rather than inherited.
-
-Every other agent in this system reads the conversation. The step-wise critic
-does not: it is handed a **case file** assembled here — the goal, the approval
-conditions, the plan as `plan.md` currently holds it, the one step under review,
-and that step's evidence — and nothing else.
-
-Why this one is different.
-
-*The transcript is the wrong size and the wrong shape.* Compression runs at the
-end of a branch, so inside a single run the executor's transcript only grows. A
-critic that inherits it reads more of other steps' traffic with every step,
-while the step it was actually asked to judge occupies a smaller share of what
-it sees. Its own verification calls then push that step's tool results out of
-the recent-full window — the critic blinds itself to the evidence it was called
-to check, in proportion to how carefully it checks.
-
-*Scope has to be structural, not advisory.* Inheriting the transcript means the
-whole plan's traffic is visible and the only thing keeping the critic inside its
-step is a sentence asking it to stay there. Handing it one step's evidence makes
-the scope a property of the input.
-
-*Statelessness.* Each review is a fresh call with no memory of the last one.
-Anything the critic needs to know about this step's history — that it was sent
-back before, and for what — is stated in the case file rather than recovered
-from a transcript. The agent is compiled with `checkpointer=False` so this holds
-even if LangGraph would otherwise resume it.
-
-The critic still verifies against the *live* interpreter and the files on disk,
-which is why clipping the transcript here costs so little: the case file is
-where a review starts, not the evidence it rests on.
-"""
-
 from __future__ import annotations
 
 from typing import Any, Iterable, List, Optional, Sequence
@@ -72,9 +39,7 @@ def _numbers(values: Iterable[int]) -> str:
     return ", ".join(listed) if listed else "none"
 
 
-# --------------------------------------------------------------------------
 # The evidence slice
-# --------------------------------------------------------------------------
 
 
 def clip_evidence(messages: Sequence[BaseMessage]) -> str:
@@ -103,9 +68,7 @@ def clip_evidence(messages: Sequence[BaseMessage]) -> str:
     return render_transcript(selected)
 
 
-# --------------------------------------------------------------------------
 # The case file
-# --------------------------------------------------------------------------
 
 
 def _plan_section(run: Optional[plan_store.PlanRun], scope: Sequence[int]) -> str:
@@ -272,9 +235,7 @@ def build_stepwise_messages(case_file: str) -> List[BaseMessage]:
     ]
 
 
-# --------------------------------------------------------------------------
 # The critic's own working context
-# --------------------------------------------------------------------------
 
 
 def critic_pre_model_state(state) -> dict:

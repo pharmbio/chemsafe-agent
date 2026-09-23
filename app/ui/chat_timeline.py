@@ -50,18 +50,15 @@ IGNORED_NODES = {
     "context_summary_meta",
     "plan_init",
     "plan_finalize",
-    # The gate's message is the brief handed to the critic, not something the
-    # user needs; the review's own verdict says the same thing in the reader's
-    # terms. Only the shared-transcript critic produces one at all — a step-wise
-    # review carries its brief inside its case file. Suppressing it still
-    # records its id, because a message merely skipped here can arrive again
-    # from a node that re-emits what it was given, under a name that is not
-    # ignored.
+    # The gate's message is the critic's brief, not for the user; the verdict says
+    # the same in the reader's terms. Only the shared-transcript critic emits one.
+    # Still record its id: a skipped message can arrive again from a node that
+    # re-emits what it was given, under a name that is not ignored.
     "critic_gate",
 }
 
-# Nodes whose output is the deliverable rather than working narration. 
-# Rendered as a report card so the answer does not look like one more grey tool box.
+# Nodes whose output is the deliverable, not working narration. Rendered as a
+# report card so the answer is not one more grey tool box.
 REPORT_NODES = {
     "summary_agent",
     "summary_agent_simple",
@@ -69,7 +66,7 @@ REPORT_NODES = {
     "summary_agent_meta",
 }
 
-# The plan under review. Styled so the thing the user is being asked to approve is legible at a glance.
+# The plan under review, styled so what needs approving is legible at a glance.
 PLAN_NODES = {"planning_agent"}
 TIMELINE_SNAPSHOT_VERSION = 1
 
@@ -303,7 +300,8 @@ def _update_tool_call_item(block: Dict[str, Any], call: Any, *, call_id: Optiona
 
     for idx, item in enumerate(block["items"]):
         if item.get("type") == "tool_call" and item.get("id") == call_key:
-            # A call can be seen twice (streamed chunk, then the committed message). Keep whatever the result already recorded.
+            # A call can be seen twice (streamed chunk, then committed message);
+            # keep whatever the result already recorded.
             item.update({k: v for k, v in entry.items() if k not in ("status", "note", "result_body")})
             return True
 
@@ -439,7 +437,8 @@ def _ingest_tool_result_raw(state: UIState, raw_msg: Any) -> bool:
     status, note = tool_display.describe_result(tool_name, raw_content)
     body = tool_display.render_result_body(tool_name, raw_content)
 
-    # Fold the outcome into the call it answers, so one action reads as one line instead of a "Tools Calling" box followed by a "Tools Result" box.
+    # Fold the outcome into the call it answers, so one action reads as one line
+    # rather than a "Tools Calling" box followed by a "Tools Result" box.
     call_key = str(tool_call_id) if tool_call_id else None
     merged = False
     if call_key:
@@ -482,8 +481,8 @@ def _ensure_agent_block(state: UIState, agent_key: str) -> Dict[str, Any]:
         if block and block["agent_name"] == agent_key:
             return block
 
-    # A different agent is taking over: resolve the previous block's spinner
-    # and record how long it ran before starting the new one.
+    # A new agent takes over: resolve the previous block's spinner and record its
+    # run time before starting the next.
     _finalize_block(state, last_block_id)
 
     block_id = state.next_message_id(agent_key)
@@ -586,7 +585,8 @@ def _refresh_block_message(state: UIState, block_id: str) -> None:
     idx = state.message_lookup.get(block_id)
     if idx is None or idx >= len(state.messages):
         return
-    # Always HTML. Mixing markdown and HTML rendering meant a block's typography changed the moment it gained its first tool call.
+    # Always HTML: mixing the two meant a block's typography changed the moment it
+    # gained its first tool call.
     state.messages[idx].content = gr.HTML(
         value=_render_block_html(block["items"], agent_name=block.get("agent_name", "")),
         container=False,

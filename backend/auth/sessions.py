@@ -1,5 +1,3 @@
-"""Session helpers for DB-backed Gradio authentication."""
-
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
