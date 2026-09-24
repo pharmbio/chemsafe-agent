@@ -53,12 +53,11 @@ Chemical safety assessment requires reasoning over heterogeneous data — molecu
 git clone https://github.com/your-username/chemsafe-agent.git
 cd chemsafe-agent
 
-# 2. Download the prebuilt memory folder and place it under persistence/
-#    Download memory.zip (~535 MB) from Google Drive:
-#      https://drive.google.com/file/d/1F0Bd4RCfBk8LgaGrby4QE3J3DBSd2bls/view?usp=share_link
-#    Then unzip it so that the folder lives at persistence/memory
-unzip ~/Downloads/memory.zip -d persistence/
-#    After this step, `persistence/memory/` should exist.
+# 2. Download the prebuilt persistence/ folder and place it under chemsafe-agent/
+#    Download persistence.zip (~6 GB, including guidelines vector store and pre-trained ML models) from Google Drive:
+#      https://drive.google.com/file/d/17ZUsk92FUA0MmHi6vjYInEvEnvCBNsUc/view?usp=sharing
+#    Then unzip it and put it under chemsafe-agent/, for example:
+unzip ~/Downloads/persistence.zip -d ./
 
 # 3. Create a .env file with the required credentials
 ## Mandatory: OpenAI API key
