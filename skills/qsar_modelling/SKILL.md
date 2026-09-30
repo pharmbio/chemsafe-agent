@@ -1,13 +1,13 @@
 ---
 name: qsar_modelling
-description: Run QSAR activity predictions on a molecular structure. Ships 19 conformal models, one callable function each: AHR_agonists, CAR_agonist, CAR_antagonist, DIO1_inhibition, DIO2_inhibition, DIO3_inhibition, NIS_inhibition, PPAR_delta_agonist, PPAR_delta_antagonist, PPAR_gamma_agonist, PPAR_gamma_antagonist, PXR_agonist, TPO_inhibition, TRHR_antagonists, TR_beta_agonist, TR_beta_antagonist, TSHR_agonist, TSHR_antagonist, TTR_binding. Use when an activity or hazard endpoint must be estimated from structure because no measured value exists. Each call returns a conformal prediction region, not a probability. For measured or regulatory values use database_traversal; for deterministic structural facts use cheminformatics.
+description: Run QSAR models on a molecular structure. Ships 19 conformal models, one callable function each: AHR_agonists, CAR_agonist, CAR_antagonist, DIO1_inhibition, DIO2_inhibition, DIO3_inhibition, NIS_inhibition, PPAR_delta_agonist, PPAR_delta_antagonist, PPAR_gamma_agonist, PPAR_gamma_antagonist, PXR_agonist, TPO_inhibition, TRHR_antagonists, TR_beta_agonist, TR_beta_antagonist, TSHR_agonist, TSHR_antagonist, TTR_binding. Use when an activity or hazard endpoint must be estimated from structure because no measured value exists. Each call returns a conformal prediction region, not a probability.
 ---
 
 # QSAR Modelling Skill
 
-Nineteen conformal models. One module per model, one function per module, same
+One module per model, one function per module, same
 signature on all of them. Pick the model you need from the table, import its
-function, call it.
+function, then call it.
 
 ## Available models
 
@@ -33,17 +33,12 @@ function, call it.
 | `TSHR_antagonist` | Thyroid-stimulating hormone receptor (TSHR) antagonism | 0.85 |
 | `TTR_binding` | Transthyretin (TTR) binding | 0.90 |
 
-Confidence is set inside each function, differs between models, and comes back
-in the result. It is not a parameter.
-
 ## Run a model
 
 ```python
 from scripts.TPO_inhibition import TPO_inhibition
 
 TPO_inhibition("CCCn1c(=O)c2nc(-c3ccccc3)[nH]c2n(CCC)c1=O")
-# {'smiles': 'CCCn1...', 'endpoint': 'TPO_inhibition', 'confidence': 0.85,
-#  'p_inactive': 0.5774, 'p_active': 0.1127, 'prediction': 'inactive'}
 ```
 
 **Import the function out of its own module.** The module and the function share
@@ -65,8 +60,8 @@ NIS_inhibition("compounds.csv")          # CSV/TSV with a column containing "smi
 
 ## Read the result
 
-`prediction` is a conformal region — the labels that cannot be ruled out at that
-model's confidence — **not** a probability:
+`prediction` is a conformal region (the labels that cannot be ruled out at that
+model's confidence), **not** a probability:
 
 | Region | Meaning |
 |---|---|
@@ -78,13 +73,7 @@ model's confidence — **not** a probability:
 `p_inactive` and `p_active` are conformal p-values; they do not sum to 1. Report
 the region, with the confidence and the p-values beside it.
 
-## Run several models
-
-Each model holds 0.4–0.7 GB and only two stay cached, so **hand one model the
-whole compound list in a single call** rather than looping compounds across
-models. Request the models the question needs; running all 19 is a real cost.
-
-## Where results go
+## Outputs location
 
 Batch CSVs land in the conversation's results folder, resolved per call —
 nothing to pass in:
@@ -94,14 +83,67 @@ persistence/results/<user_id>/<thread>/qsar_predictions/<function>_results.csv
 ```
 
 Re-running a model in the same conversation overwrites its CSV. To name the
-file yourself:
+file yourself, use:
 
 ```python
 path = NIS_inhibition(smiles_list, output_name=prepare_output_path("nis_predictions.csv"))
 ```
 
-## More detail
+## Using a prediction as evidence
 
-[`references/models.md`](references/models.md) — model provenance and citation,
-environment variables, known deviations from the published models, how to
-validate, how a region enters `woe_reasoning` or a QPRF, and the anti-patterns.
+A conformal region is one line of evidence, never a conclusion. Record the
+region, the confidence (0.8), both p-values, the model citation and the
+applicability-domain status together — a bare `active` is not reportable under
+OECD Principle 3.
+
+- **`woe_reasoning`** — the prediction is a Q-silico line of evidence. An
+  `empty` region is a data gap and so is a `both` region; neither is a negative
+  result, and neither may be reported as "no activity predicted".
+- **`qprf_generating`** — use when one prediction must be documented for a
+  dossier. The region and the `empty`/`both` signal are the AD material for
+  QPRF §4 and §7.
+- **`cheminformatics`** — supplies the standardized structure on the way in,
+  and `applicability_domain_check` for an independent similarity-to-training-set
+  view. That check complements the conformal AD; it does not replace it.
+- **`database_traversal`** — check for a measured value first. A prediction
+  where an experimental result exists is a weaker answer, not a faster one.
+
+These models predict activity at a molecular target, which sits at the top of
+an adverse outcome pathway. A prediction supports a mechanistic hypothesis; the
+apical effect and the classification call are `woe_reasoning`'s.
+
+## Anti-patterns
+
+- **Don't read a region as a probability.** `p_active = 0.11` does not mean
+  "11% likely active". These are p-values for excluding a label, and they do
+  not sum to 1.
+- **Don't report `both` as borderline or intermediate.** The model is undecided
+  at 0.8 confidence. Say that.
+- **Don't report `empty` as "inactive".** The compound is outside the
+  applicability domain and the model has said nothing about it.
+- **Don't raise the confidence to resolve a `both`.** Higher confidence widens
+  regions and produces more `both` calls. Nothing makes an undecided compound
+  decided.
+- **Don't predict on unstandardized structures**, and don't strip
+  stereochemistry to make a SMILES parse.
+- **Don't treat an `"Error: ..."` string as a value.** It is a failed call to
+  report, not a null result.
+- **Don't present a model prediction as a GHS or CLP classification.**
+  These models predict molecular-level activity, not apical hazard.
+- **Don't run all 19 models and reason over the count of actives.** The
+  endpoints have different training sets, ADs and base rates; a tally across
+  them is not a hazard score.
+- **Don't compare results with the published paper's numbers as if identical** —
+  see [known deviations](#known-deviations-from-the-published-models).
+- **Do not create hallucinations** about predicted values. Report only what an
+  endpoint function actually returned.
+
+## Model provenance
+
+Cite this for any prediction that enters an evidence table or a dossier:
+
+> Dracheva, E.; Norinder, U.; Rydén, P.; Engelhardt, J.; Weiss, J. M.;
+> Andersson, P. L. *In Silico* Identification of Potential Thyroid Hormone
+> System Disruptors among Chemicals in Human Serum and Chemicals with a High
+> Exposure Index. *Environ. Sci. Technol.* **2022**.
+> DOI: [10.1021/acs.est.1c07762](https://doi.org/10.1021/acs.est.1c07762)
