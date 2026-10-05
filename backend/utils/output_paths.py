@@ -140,6 +140,18 @@ def task_file_path(
     return folder / filename
 
 
+def safe_mtime(path: Path) -> float:
+    """A file's mtime, or 0.0 if it vanished since it was listed.
+
+    Agent threads write while the UI scans; an atomic write's temp file can be
+    listed and then renamed away before it is stat-ed.
+    """
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def list_task_files(
     conversation_id: str,
     *,
@@ -158,7 +170,7 @@ def list_task_files(
                 continue
             seen.add(resolved)
             files.append(path)
-    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    files.sort(key=safe_mtime, reverse=True)
     return files
 
 

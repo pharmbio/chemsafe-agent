@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 
 from app.downloads import is_data_path
 from app.state import FileRecord, UIState
-from backend.utils.output_paths import list_task_files, remove_task_dir
+from backend.utils.output_paths import list_task_files, remove_task_dir, safe_mtime
 from backend.utils.storage_paths import thread_data_root
 
 
@@ -30,7 +30,7 @@ def list_upload_files(thread_id: str, *, user_id: Optional[str]) -> List[Path]:
     if not root.exists():
         return []
     files = [path for path in root.rglob("*") if path.is_file()]
-    files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    files.sort(key=safe_mtime, reverse=True)
     return files
 
 
