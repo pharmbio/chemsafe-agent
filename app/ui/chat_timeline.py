@@ -5,6 +5,7 @@ import time
 from copy import deepcopy
 from html import escape
 from typing import Any, Dict, Iterable, List, Optional, Set
+from langchain_core.utils.json import parse_partial_json
 from markdown_it import MarkdownIt
 
 _markdown_to_html = None
@@ -68,6 +69,12 @@ REPORT_NODES = {
 
 # The plan under review, styled so what needs approving is legible at a glance.
 PLAN_NODES = {"planning_agent"}
+
+# The critic's last turn is its verdict written out as JSON (partial while it
+# streams); rendered as a list rather than the raw object.
+CRITIC_NODES = {"critic_agent"}
+_VERDICT_DECISIONS = {"accept": "**Accepted**", "revise": "**Sent back for revision**"}
+_FINDING_SEVERITIES = {"blocking": "Blocking", "advisory": "Advisory"}
 TIMELINE_SNAPSHOT_VERSION = 1
 
 _MARKDOWN_IT_RENDERER = (
@@ -613,6 +620,8 @@ def _render_block_html(items: List[Dict[str, Any]], *, agent_name: str = "") -> 
         item_type = item.get("type")
         if item_type == "message":
             content = item.get("content", "")
+            if content and agent_name in CRITIC_NODES:
+                content = _critic_verdict_markdown(content) or content
             if content:
                 sections.append(_render_message_section_html(content, kind=kind))
         elif item_type == "tool_call":
@@ -648,6 +657,51 @@ def _render_message_section_html(content: str, *, kind: str = "activity") -> str
     else:
         body = f"<div class='agent-message-inline'>{escape(stripped)}</div>"
     return f"<section class='agent-message-section agent-message-section--{kind}'>{body}</section>"
+
+
+def _critic_verdict_markdown(content: str) -> Optional[str]:
+    """The critic's JSON verdict as markdown, or None if the text is not one."""
+    text = content.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        verdict = parse_partial_json(text)
+    except ValueError:
+        return None
+    if not isinstance(verdict, dict):
+        return None
+    if verdict and not {"decision", "findings", "verified"} & verdict.keys():
+        return None
+
+    lines: List[str] = []
+    decision = _VERDICT_DECISIONS.get(str(verdict.get("decision") or ""))
+    if decision:
+        lines += [decision, ""]
+
+    findings = [f for f in verdict.get("findings") or [] if isinstance(f, dict)]
+    if findings:
+        lines.append("**Findings**")
+        for finding in findings:
+            label = _FINDING_SEVERITIES.get(str(finding.get("severity") or ""), "Finding")
+            if finding.get("step"):
+                label += f" · step {finding['step']}"
+            claim = str(finding.get("claim") or "").strip()
+            lines.append(f"- **{label}**" + (f" — {claim}" if claim else ""))
+            for key, name in (("evidence", "Evidence"), ("required_action", "Required action")):
+                value = str(finding.get(key) or "").strip()
+                if value:
+                    lines.append(f"  - *{name}:* {value}")
+        lines.append("")
+
+    # The prompt asks for one line; the model often returns a list.
+    verified = verdict.get("verified")
+    checks = verified if isinstance(verified, list) else [verified]
+    checks = [str(check).strip() for check in checks if str(check or "").strip()]
+    if checks:
+        lines.append("**Verified**")
+        lines += [f"- {check}" for check in checks]
+
+    return "\n".join(lines).strip() or "*Writing the verdict…*"
 
 
 def _render_error_card(title: Optional[str], message: Optional[str], detail: Optional[str] = None) -> str:

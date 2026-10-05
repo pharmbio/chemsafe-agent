@@ -259,6 +259,12 @@ async def stream_langgraph_events(
                 if not isinstance(message, AIMessageChunk) or not STREAM_TOKENS:
                     continue
 
+                # A react agent's `response_format` call streams its schema as raw
+                # JSON. It is data for the next node (the critic's verdict is
+                # rendered by critic_review), and no committed message replaces it.
+                if (metadata or {}).get("langgraph_node") == "generate_structured_response":
+                    continue
+
                 # Stream text as generated; the completed message that follows replaces
                 # the accumulated text, so an unflushed remainder self-corrects.
                 text = _stream_chunk_text(message)
