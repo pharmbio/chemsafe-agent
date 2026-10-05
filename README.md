@@ -28,7 +28,8 @@ Chemical safety assessment requires reasoning over heterogeneous data — molecu
 | --- | --- |
 | **Databases** | ECHA, PubChem, NIOSH |
 | **Guidelines** | ECHA, NIH |
-| **Cheminformatics tools** | Tox21, admet-ai, RDKit (flexible molecular calculation and modification) |
+| **Predictive models** | 19 models from [MISTRA's tool box](https://pubs.acs.org/esthag/article/56/12/8363/489644/In-Silico-Identification-of-Potential-Thyroid) |
+| **Cheminformatics tools** | RDKit (flexible molecular calculation and modification) |
 
 ### Grounding & Memory Systems
 
