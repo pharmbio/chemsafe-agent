@@ -137,7 +137,7 @@ async def get_async_pool() -> ResilientAsyncConnectionPool:
             return _pool
 
         if not DATABASE_URL:
-            raise ValueError("DATABASE_URL environment variable is required for PostgreSQL persistence")
+            raise ValueError("DATABASE_URL is not set. Sign-in requires a PostgreSQL database: add DATABASE_URL to .env and restart.")
 
         conninfo = DATABASE_URL
         if "application_name" not in conninfo:
