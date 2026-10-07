@@ -7,7 +7,8 @@ description: Run QSAR models on a molecular structure. Ships 19 conformal models
 
 One module per model, one function per module, same
 signature on all of them. Pick the model you need from the table, import its
-function, then call it.
+function, then call it. Each model runs as its own web API (see
+[where the models run](#where-the-models-run)); the function calls it for you.
 
 ## Available models
 
@@ -55,8 +56,17 @@ NIS_inhibition("compounds.csv")          # CSV/TSV with a column containing "smi
 ```
 
 - **One compound returns a dict; more than one writes a CSV and returns its path.** A trailing `[warning]` line names any structure RDKit could not parse, so take `str(path).splitlines()[0]` before opening the file.
-- **Failures come back as `"Error: ..."` strings, not exceptions.** Check that prefix before using a result.
+- **Failures come back as `"Error: ..."` strings, not exceptions.** Check that prefix before using a result. An error naming the model's URL means its service could not be reached or rejected the input: the model has not run, so report the call as failed.
 - **Standardize first** with `cheminformatics.standardize_smiles`; an unstandardized salt is a different descriptor vector.
+
+## Where the models run
+
+Each model is its own web API on SciLifeLab Serve, at
+`https://<subdomain>.serve.scilifelab.se`: the model's name in lower case, with
+`-` for `_` (`TPO_inhibition` → `tpo-inhibition`, `PPAR_delta_agonist` →
+`ppar-delta-agonist`). The model and its confidence are fixed by the service,
+and every result carries both. Calls need network access; large inputs are sent
+in batches of 1000 and come back as one CSV.
 
 ## Read the result
 

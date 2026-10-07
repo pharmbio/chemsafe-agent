@@ -7,10 +7,11 @@ name, so importing the module alone leaves you holding something uncallable:
     from scripts import TPO_inhibition                    # the MODULE, not the function
 
 Each function takes a SMILES string, a comma-separated string, a list, or a
-CSV/TSV path. The conformal confidence is set inside each function and differs
-between models, so it is read from the result rather than passed in. Shared
-machinery -- input handling, descriptors, reading the 2021 model pickles and
-the conformal prediction itself -- lives in utils.py.
+CSV/TSV path. Each model runs as its own web API, at
+https://<subdomain>.serve.scilifelab.se; utils.py holds the client every
+function shares (input handling, the API calls, the result CSV). The conformal
+confidence is fixed per model by its server and differs between models, so it
+is read from the result rather than passed in.
 
 This file is not executed when the app merges every skill's scripts/ into one
 namespace package; it only runs if this directory is imported as a package

@@ -2,17 +2,16 @@ from .utils import predict_endpoint
 
 
 def TRHR_antagonists(smiles_input, output_name=None):
-    '''Predict thyrotropin-releasing hormone receptor (TRHR) antagonism with the RiskMix conformal model.
+    '''Predict thyrotropin-releasing hormone receptor (TRHR) antagonism with the RiskMix conformal model, through its web API.
 
     Parameters:
     ---------
     smiles_input (str or list): A SMILES string, a comma-separated string of SMILES, a list of SMILES, or a path to a CSV/TSV file with a 'smiles' column.
-    output_name (str, optional): path for the results CSV. 
+    output_name (str, optional): path for the results CSV.
 
     Returns:
     ----------
     results (dict or str): A dict for a single compound, otherwise the path to the results CSV.
     '''
 
-    confidence = 0.85
-    return predict_endpoint("TRHR_antagonists", smiles_input, confidence, output_name)
+    return predict_endpoint("TRHR_antagonists", smiles_input, output_name)
