@@ -13,6 +13,8 @@ from PIL import Image
 
 from app.config import APP_TITLE
 from app.resources import (
+    ADMET_AI_COLLECTION,
+    ADMET_AI_MODELS,
     CHEMINFORMATICS,
     DATABASES,
     GUIDELINE_ORGANIZATIONS,
@@ -36,7 +38,6 @@ RESOURCES_CSS = """
         color-scheme: light;
         --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         --font-editorial: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-        --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         --page-bg: #f8f8f8;
         --surface-bg: #ffffff;
         --surface-tint: #f5f7f8;
@@ -195,7 +196,8 @@ RESOURCES_CSS = """
     tbody tr:last-child td { border-bottom: none; }
     tbody tr:hover td { background: #fafbfc; }
     .model-url { white-space: nowrap; }
-    .model-name { font-family: var(--font-mono); font-size: 0.84rem; white-space: nowrap; }
+    .model-name { white-space: nowrap; }
+    .model-category { width: 13rem; white-space: nowrap; }
     .category { color: var(--text-soft); white-space: nowrap; }
     .guideline-table th:last-child, .guideline-table td.category { width: 13rem; }
 
@@ -306,17 +308,17 @@ def _section(section_id: str, title: str, body: str) -> str:
     )
 
 
-def _models_body() -> str:
-    rows = "".join(
-        "<tr>"
-        f"<td class='model-name'>{escape(model['name'])}</td>"
-        f"<td>{escape(model['endpoint'])}</td>"
-        f"<td class='model-url'><a href='{escape(model_url(model['name']), quote=True)}' {EXTERNAL}>"
-        f"{escape(model_url(model['name']))}</a></td>"
-        "</tr>"
-        for model in PREDICTIVE_MODELS
+def _model_link(url: str) -> str:
+    return f"<a href='{escape(url, quote=True)}' {EXTERNAL}>{escape(url)}</a>"
+
+
+def _model_panel(collection: Dict[str, str], columns: List[str], rows: str) -> str:
+    head = "".join(f"<th scope='col'>{escape(column)}</th>" for column in columns)
+    service = (
+        f"<p>Model URL: <span class='model-url'>{_model_link(collection['model_url'])}</span></p>"
+        if "model_url" in collection
+        else ""
     )
-    collection = MODEL_COLLECTION
     return (
         "<div class='panel'>"
         "<div class='panel-head'>"
@@ -325,14 +327,36 @@ def _models_body() -> str:
         f"<h3>{escape(collection['name'])}</h3>"
         f"<p>{escape(collection['description'])} "
         f"<a href='{escape(collection['url'], quote=True)}' {EXTERNAL}>Model details on GitHub</a></p>"
+        f"{service}"
         "</div>"
         "</div>"
         "<table class='stacked'>"
-        "<thead><tr><th scope='col'>Model name</th><th scope='col'>Endpoints</th>"
-        "<th scope='col'>Model URL</th></tr></thead>"
+        f"<thead><tr>{head}</tr></thead>"
         f"<tbody>{rows}</tbody>"
         "</table>"
         "</div>"
+    )
+
+
+def _models_body() -> str:
+    safechem_rows = "".join(
+        "<tr>"
+        f"<td class='model-name'>{escape(model['name'])}</td>"
+        f"<td>{escape(model['endpoint'])}</td>"
+        f"<td class='model-url'>{_model_link(model_url(model['name']))}</td>"
+        "</tr>"
+        for model in PREDICTIVE_MODELS
+    )
+    admet_rows = "".join(
+        "<tr>"
+        f"<td class='model-category'>{escape(category)}</td>"
+        f"<td>{escape(', '.join(names))}</td>"
+        "</tr>"
+        for category, names in ADMET_AI_MODELS.items()
+    )
+    return (
+        _model_panel(MODEL_COLLECTION, ["Model name", "Endpoints", "Model URL"], safechem_rows)
+        + _model_panel(ADMET_AI_COLLECTION, ["Category", "Model name"], admet_rows)
     )
 
 

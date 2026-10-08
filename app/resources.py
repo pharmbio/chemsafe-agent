@@ -83,6 +83,44 @@ def model_url(name: str) -> str:
     """Where a model's web API runs; the same rule skills/qsar_modelling/scripts/utils.py uses."""
     return f"https://{name.lower().replace('_', '-')}.serve.scilifelab.se"
 
+
+# One web service answers for every ADMET-AI endpoint, so its URL is given once
+# for the collection rather than per model.
+ADMET_AI_COLLECTION: Dict[str, str] = {
+    "name": "ADMET-AI",
+    "logo": "images/org_logo/admet-ai.png",
+    "url": "https://github.com/swansonk14/admet_ai",
+    "model_url": "https://admet-ai.serve.scilifelab.se",
+    "description": (
+        "Chemprop-RDKit graph neural networks trained on Therapeutics Data Commons datasets. "
+        "All endpoints run as one web service on SciLifeLab Serve and are predicted in a single call."
+    ),
+}
+
+# Mirrors the endpoint tables in skills/admet_prediction/SKILL.md, without the
+# dataset author in each name. The RDKit physicochemical properties the service
+# also returns are computed, not predicted, so they are not listed.
+ADMET_AI_MODELS: Dict[str, List[str]] = {
+    "Absorption": [
+        "HIA", "Bioavailability", "Solubility", "Lipophilicity",
+        "HydrationFreeEnergy", "Caco2", "PAMPA", "Pgp",
+    ],
+    "Distribution": ["Blood-brain barrier", "Plasma protein binding rate", "Volume of distribution at steady state"],
+    "Metabolism": [
+        "CYP1A2", "CYP2C19", "CYP2C9", "CYP2D6", "CYP3A4",
+        "CYP2C9_Substrate", "CYP2D6_Substrate", "CYP3A4_Substrate",
+    ],
+    "Excretion": ["Clearance_Hepatocyte", "Clearance_Microsome", "Half_Life"],
+    "Toxicity": ["hERG", "ClinTox", "AMES", "DILI", "Carcinogens", "LD50", "Skin_Reaction"],
+    "Tox21": [
+        "Androgen receptor", "Androgen receptor ligand-binding domain", "Aryl hydrocarbon receptor",
+        "Aromatase", "Estrogen receptor", "Estrogen receptor ligand-binding domain",
+        "Peroxisome proliferator-activated receptor gamma", "Antioxidant response element",
+        "ATPase family AAA domain-containing protein 5", "Heat shock factor response element",
+        "Mitochondrial membrane potential", "Tumour protein p53",
+    ],
+}
+
 # Guidelines are grouped by the "organization" key; each group shows this logo once.
 GUIDELINE_ORGANIZATIONS: Dict[str, Dict[str, str]] = {
     "ECHA": {"name": "European Chemicals Agency (ECHA)", "logo": "images/org_logo/echa.png"},
