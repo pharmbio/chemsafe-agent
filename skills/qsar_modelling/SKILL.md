@@ -52,12 +52,38 @@ Every model accepts the same inputs and returns the same shapes:
 NIS_inhibition("CCO")                    # one SMILES      -> dict
 NIS_inhibition("CCO, c1ccccc1O")         # comma-separated -> path to CSV
 NIS_inhibition(["CCO", "c1ccccc1O"])     # list            -> path to CSV
-NIS_inhibition("compounds.csv")          # CSV/TSV with a column containing "smiles"
+NIS_inhibition("/full/path/compounds.csv")  # CSV/TSV with a column containing "smiles"
 ```
+
+A file must be given by its full path; a bare file name is not found.
 
 - **One compound returns a dict; more than one writes a CSV and returns its path.** A trailing `[warning]` line names any structure RDKit could not parse, so take `str(path).splitlines()[0]` before opening the file.
 - **Failures come back as `"Error: ..."` strings, not exceptions.** Check that prefix before using a result. An error naming the model's URL means its service could not be reached or rejected the input: the model has not run, so report the call as failed.
 - **Standardize first** with `cheminformatics.standardize_smiles`; an unstandardized salt is a different descriptor vector.
+
+## Run a dataset
+
+The result CSV holds only the SMILES and the prediction, one row per input
+SMILES in input order. To keep a dataset's IDs, standardize, pass the list, and
+attach the prediction columns back by position:
+
+```python
+import pandas as pd
+from scripts.chem_standardize import standardize_molecules
+from scripts.TPO_inhibition import TPO_inhibition
+
+df = pd.read_csv("/full/path/compounds.csv").dropna(subset=["SMILES"])
+df["std_smiles"] = [m.canonical_smiles for m in standardize_molecules(df["SMILES"])]
+df = df[df["std_smiles"].notna()].reset_index(drop=True)
+
+res = TPO_inhibition(df["std_smiles"].tolist())
+pred = pd.read_csv(str(res).splitlines()[0])
+df = pd.concat([df, pred.drop(columns="smiles")], axis=1)
+```
+
+Each model takes about 15 s per 1000 compounds, and a `python_executor` call
+is stopped after 10 minutes, losing its variables. Several models on more than
+~2000 compounds: run one model per call.
 
 ## Where the models run
 
@@ -89,8 +115,11 @@ Batch CSVs land in the conversation's results folder, resolved per call —
 nothing to pass in:
 
 ```
-persistence/results/<user_id>/<thread>/qsar_predictions/<function>_results.csv
+persistence/results/<user_id>/<thread>/qsar_predictions/<endpoint>_results.csv
 ```
+
+`<endpoint>` is the `endpoint` field of the result, which for the PPAR models
+is written with a hyphen (`PPAR-delta_agonist_results.csv`).
 
 Re-running a model in the same conversation overwrites its CSV. To name the
 file yourself, use:
@@ -102,7 +131,7 @@ path = NIS_inhibition(smiles_list, output_name=prepare_output_path("nis_predicti
 ## Using a prediction as evidence
 
 A conformal region is one line of evidence, never a conclusion. Record the
-region, the confidence (0.8), both p-values, the model citation and the
+region, the model's confidence, both p-values, the model citation and the
 applicability-domain status together — a bare `active` is not reportable under
 OECD Principle 3.
 
@@ -128,7 +157,7 @@ apical effect and the classification call are `woe_reasoning`'s.
   "11% likely active". These are p-values for excluding a label, and they do
   not sum to 1.
 - **Don't report `both` as borderline or intermediate.** The model is undecided
-  at 0.8 confidence. Say that.
+  at its confidence. Say that.
 - **Don't report `empty` as "inactive".** The compound is outside the
   applicability domain and the model has said nothing about it.
 - **Don't raise the confidence to resolve a `both`.** Higher confidence widens
@@ -143,8 +172,7 @@ apical effect and the classification call are `woe_reasoning`'s.
 - **Don't run all 19 models and reason over the count of actives.** The
   endpoints have different training sets, ADs and base rates; a tally across
   them is not a hazard score.
-- **Don't compare results with the published paper's numbers as if identical** —
-  see [known deviations](#known-deviations-from-the-published-models).
+- **Don't compare results with the published paper's numbers as if identical.**
 - **Do not create hallucinations** about predicted values. Report only what an
   endpoint function actually returned.
 

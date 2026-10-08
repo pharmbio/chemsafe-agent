@@ -72,6 +72,8 @@ def parse_smiles_input(smiles_input: Union[str, List[str]]) -> List[str]:
                 "No column containing 'smiles' found in {}. Columns present: {}.".format(
                     smiles_input, ", ".join(str(c) for c in frame.columns)))
         smiles_list = [s.strip() for s in frame[matches[0]].dropna().astype(str) if s.strip()]
+    elif isinstance(smiles_input, str) and smiles_input.strip().lower().endswith((".csv", ".tsv")):
+        raise PredictionError("File not found: {}. Pass the file's full path.".format(smiles_input))
     elif isinstance(smiles_input, str):
         smiles_list = [item.strip() for item in smiles_input.split(",") if item.strip()]
     elif isinstance(smiles_input, (list, tuple)):
