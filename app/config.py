@@ -37,17 +37,12 @@ PERSISTENCE_ROOT = Path(
 DATA_ROOT = Path(os.environ.get("DATA_ROOT", PERSISTENCE_ROOT / "uploaded_data")).resolve()
 RESULTS_ROOT = Path(os.environ.get("RESULTS_ROOT", PERSISTENCE_ROOT / "results")).resolve()
 MEMORY_ROOT = Path(os.environ.get("MEMORY_ROOT", PERSISTENCE_ROOT / "memory")).resolve()
-# Read-only model assets (e.g. the RiskMix THS pickles under models/ths_models).
-# Deliberately not one of the per-conversation managed roots in python_executor:
-# these are shared reference data, readable like the rest of the repo.
-MODELS_ROOT = Path(os.environ.get("MODELS_ROOT", PERSISTENCE_ROOT / "models")).resolve()
 
 for directory in (
     PERSISTENCE_ROOT,
     DATA_ROOT,
     RESULTS_ROOT,
     MEMORY_ROOT,
-    MODELS_ROOT,
 ):
     directory.mkdir(parents=True, exist_ok=True)
 
