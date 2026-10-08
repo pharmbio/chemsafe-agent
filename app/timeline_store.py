@@ -18,6 +18,20 @@ TIMELINE_STATE_VERSION = 1
 # used to cost a load + rebuild + save round trip, hundreds over a long run.
 DETACHED_FLUSH_SECONDS = 2.0
 
+# Saves per thread since startup. A page following a run that another page
+# started compares this with what it last loaded instead of re-reading the
+# store every tick.
+_revisions: Dict[str, int] = {}
+
+
+def revision(thread_id: str) -> int:
+    return _revisions.get(thread_id, 0)
+
+
+async def _save(user_id: str, thread_id: str, state: UIState) -> None:
+    await save_timeline(user_id, thread_id, serialize_timeline_state(state))
+    _revisions[thread_id] = revision(thread_id) + 1
+
 
 def serialize_timeline_state(state: UIState) -> Dict[str, Any]:
     return {
@@ -51,12 +65,16 @@ def restore_timeline_processing_state(state: UIState, payload: Any) -> None:
     }
 
 
-def apply_snapshot(state: UIState, payload: Any) -> bool:
-    """Rebuild ``state``'s timeline from a persisted payload."""
+def apply_snapshot(state: UIState, payload: Any, *, live: bool = False) -> bool:
+    """Rebuild ``state``'s timeline from a persisted payload.
+
+    ``live`` is for a run still in flight elsewhere: its unfinished blocks keep
+    their spinner rather than reading as done.
+    """
     snapshot = extract_timeline_snapshot(payload)
     rebuilt = False
     if isinstance(snapshot, dict):
-        rebuilt = rebuild_from_timeline_snapshot(state, snapshot)
+        rebuilt = rebuild_from_timeline_snapshot(state, snapshot, live=live)
     elif isinstance(snapshot, list):
         rebuild_from_plain_messages(state, snapshot)
         rebuilt = True
@@ -69,7 +87,7 @@ def apply_snapshot(state: UIState, payload: Any) -> bool:
 async def persist(thread_id: Optional[str], state: UIState) -> None:
     if not thread_id or not state.user_id:
         return
-    await save_timeline(state.user_id, thread_id, serialize_timeline_state(state))
+    await _save(state.user_id, thread_id, state)
 
 
 async def load_detached(user_id: str, thread_id: str) -> UIState:
@@ -115,11 +133,7 @@ class DetachedTimelineWriter:
         now = time.monotonic()
         if not force and now - self._last_flush < DETACHED_FLUSH_SECONDS:
             return
-        await save_timeline(
-            self._user_id,
-            self._thread_id,
-            serialize_timeline_state(self._state),
-        )
+        await _save(self._user_id, self._thread_id, self._state)
         self._dirty = False
         self._last_flush = now
 

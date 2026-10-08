@@ -22,11 +22,18 @@ PARTNER_ORGANIZATIONS: List[Dict[str, str]] = [
         "size": "xl",
     },
         {
+        "name": "Mistra SafeChem",
+        "logo": "images/org_logo/safechem.png",
+        "url": "https://mistrasafechem.se/",
+        "size": "xl",
+    },
+        {
         "name": "SciLifeLab Serve",
         "logo": "images/serve_logo.png",
         "url": "https://serve.scilifelab.se/",
         "size": "xl",
     },
+
 ]
 
 

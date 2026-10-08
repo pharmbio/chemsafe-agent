@@ -14,12 +14,37 @@ LOGO_PATH = "images/logo.png"
 INTRO_IMAGE_PATH = "images/agent_illustration.png"
 INTRO_IMAGE_ALT = f"{APP_TITLE} illustration"
 
-HEADER_LINKS_HTML = (
-    "<div class='header-links-content'>"
-    "<a class='header-link' href='https://github.com/pharmbio/chemsafe-agent' target='_blank' rel='noopener noreferrer'>GitHub</a>"
-    "<span class='header-link-divider' aria-hidden='true'>|</span>"
-    "<a class='header-link' href='/' target='_self' rel='noopener noreferrer'>Workspace</a>"
-    "</div>"
+RESOURCES_PATH = "/resources"
+
+
+def header_links_html(current: str) -> str:
+    """Workspace | Resources | GitHub, with ``current`` (the page being viewed) marked.
+
+    ``data-view`` lets the workspace switch between the two in place (see
+    app/ui/scripts.py); on the standalone Resources page they are plain links.
+    """
+    links = [
+        "<a class='header-link' href='{href}' target='_self' data-view='{view}'{mark}>{label}</a>".format(
+            href=href,
+            label=label,
+            view=label.lower(),
+            mark=" aria-current='page'" if label == current else "",
+        )
+        for label, href in (("Workspace", "/"), ("Resources", RESOURCES_PATH))
+    ]
+    links.append(
+        "<a class='header-link' href='https://github.com/pharmbio/chemsafe-agent' target='_blank' rel='noopener noreferrer'>GitHub</a>"
+    )
+    divider = "<span class='header-link-divider' aria-hidden='true'>|</span>"
+    return f"<div class='header-links-content'>{divider.join(links)}</div>"
+
+
+HEADER_LINKS_HTML = header_links_html("Workspace")
+
+# The workspace's Resources view: the Resources page in its embedded form. The
+# head script sets src (ahead of the first switch) and the height.
+RESOURCES_VIEW_HTML = (
+    f"<iframe id='resources-frame' title='Resources' data-src='{RESOURCES_PATH}?embed=1'></iframe>"
 )
 
 

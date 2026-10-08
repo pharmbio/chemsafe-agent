@@ -11,6 +11,7 @@ from app.config import APP_TITLE, DATABASE_URL, GRADIO_SERVER_NAME, GRADIO_SERVE
 from app.downloads import FILES_ROUTER
 from app.session import AUTH_SERVICE
 from app.ui.layout import build_demo
+from app.ui.resources_page import RESOURCES_ROUTER
 from backend.db import (
     close_async_pool,
     close_postgres_checkpointer,
@@ -41,6 +42,7 @@ def create_fastapi_app() -> FastAPI:
     demo = build_demo()
     fastapi_app = FastAPI(title=APP_TITLE, lifespan=_app_lifespan)
     fastapi_app.include_router(FILES_ROUTER)
+    fastapi_app.include_router(RESOURCES_ROUTER)
     mount_kwargs = {"path": "/"}
     if "footer_links" in inspect.signature(gr.mount_gradio_app).parameters:
         mount_kwargs["footer_links"] = ["api", "gradio"]

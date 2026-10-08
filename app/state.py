@@ -27,6 +27,12 @@ class FileRecord:
     record_id: Optional[str] = None
 
 
+# The state each in-flight run writes into, by thread. A run outlives the page
+# that started it, so whether a conversation is busy is answered here rather
+# than by any one page's state.
+ACTIVE_RUNS: Dict[str, "UIState"] = {}
+
+
 @dataclass
 class UIState:
     """Container for the Gradio UI session state."""
@@ -61,7 +67,9 @@ class UIState:
     last_run_at: Dict[str, datetime] = field(default_factory=dict)
     current_app_config: Optional[AppRunConfig] = None
     stop_signals: Dict[str, bool] = field(default_factory=dict)
-    running_threads: Set[str] = field(default_factory=set)
+    # Marks the loop keeping this page in step with a run another page started
+    # (session.on_follow_run); a newer loop replaces it and the old one exits.
+    follower: Optional[object] = None
     user_id: Optional[str] = None
     user_email: Optional[str] = None
     is_authenticated: bool = False
@@ -76,8 +84,8 @@ class UIState:
 
     @property
     def is_running(self) -> bool:
-        """True when the thread on screen has a run in flight."""
-        return bool(self.current_thread_id and self.current_thread_id in self.running_threads)
+        """True when the thread on screen has a run in flight, from any page."""
+        return bool(self.current_thread_id and self.current_thread_id in ACTIVE_RUNS)
 
     def ensure_thread_storage(self, thread_id: str) -> None:
         if thread_id not in self.thread_files:

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Optional
 
 import gradio as gr
 
 from app import timeline_store
-from app.config import DEFAULT_CONVERSATION_TITLE
+from app.config import DEFAULT_CONVERSATION_TITLE, logger
 from app.conversation_store import create_thread, delete_thread, load_threads, load_timeline
 from app.downloads import is_data_path
 from app.files import (
@@ -18,7 +19,7 @@ from app.files import (
     save_uploaded_file,
 )
 from app.langgraph_runner import read_pending_approval
-from app.state import UIState
+from app.state import ACTIVE_RUNS, UIState
 from app.ui.chat_timeline import reset_chat_messages
 from app.ui.conversation_panel import conversation_panel_update, thread_to_dict
 from app.ui.progress_panel import progress_update
@@ -27,6 +28,8 @@ from backend.auth.service import AuthService
 
 AUTH_SERVICE = AuthService()
 PASSWORD_MIN_LENGTH = 8
+# How often a page following another page's run checks whether it saved.
+FOLLOW_POLL_SECONDS = 0.5
 
 
 def initialize_state() -> UIState:
@@ -55,7 +58,7 @@ def reset_user_state(state: UIState) -> None:
     state.uploaded_files = []
     state.current_app_config = None
     state.stop_signals = {}
-    state.running_threads = set()
+    state.follower = None
     state.pending_approval = None
     state.stale_threads = set()
     # Nothing sent to the signed-out panel yet, so the next render must emit it
@@ -166,13 +169,37 @@ async def _delete_thread_action(thread_id: Optional[str], state: UIState):
     return render(state)
 
 
+def _sign_in(state: UIState, user, session_token: str) -> None:
+    state.user_id = str(user.id)
+    state.user_email = user.email
+    state.is_authenticated = True
+    state.is_verified = True
+    state.session_token = session_token
+
+
 # Gradio handlers
 
 
-async def on_app_load():
+async def on_app_load(session_token: Optional[str]):
+    """Open the workspace, signed in again if the browser holds a live session.
+
+    Every page load starts a fresh Gradio session, so without the stored token a
+    reload, or a visit to /resources and back, signed the user out.
+    """
     state = initialize_state()
-    await sync_user_threads(state, ensure_one=False)
-    return (*render_auth(state, clear_input=True), gr.update(value=""))
+    stored_token = gr.skip()
+    if session_token:
+        try:
+            user = await AUTH_SERVICE.restore_session(session_token)
+        except Exception:  # noqa: BLE001 - keep the token; the database may be back next load
+            logger.exception("Could not restore the stored session")
+        else:
+            if user:
+                _sign_in(state, user, session_token)
+            else:
+                stored_token = None  # expired or revoked
+    await sync_user_threads(state, ensure_one=state.is_authenticated)
+    return (*render_auth(state, clear_input=True), gr.update(value=""), stored_token)
 
 
 async def on_new_task(state: UIState):
@@ -232,20 +259,16 @@ async def on_login(email: str, password: str, state: UIState):
     password = password or ""
     if not email or not password:
         state.auth_error = auth_message("Email and password are required.", success=False)
-        return render_auth(state)
+        return (*render_auth(state), gr.skip())
     try:
         user = await AUTH_SERVICE.login(email, password)
-        state.user_id = str(user.id)
-        state.user_email = user.email
-        state.is_authenticated = True
-        state.is_verified = True
-        state.session_token = await AUTH_SERVICE.create_session(user.id)
+        _sign_in(state, user, await AUTH_SERVICE.create_session(user.id))
         state.auth_error = auth_message("Signed in successfully.", success=True)
         await sync_user_threads(state)
     except Exception as exc:  # noqa: BLE001 - shown to the user verbatim
         reset_user_state(state)
         state.auth_error = auth_message(str(exc), success=False)
-    return render_auth(state)
+    return (*render_auth(state), state.session_token)
 
 
 async def on_logout(state: UIState):
@@ -253,7 +276,7 @@ async def on_logout(state: UIState):
     await AUTH_SERVICE.logout(state.session_token)
     reset_user_state(state)
     state.auth_error = auth_message("Logged out.", success=True)
-    return render_auth(state)
+    return (*render_auth(state), None)
 
 
 # Files
@@ -298,7 +321,7 @@ async def on_periodic_file_refresh(state: UIState):
     The plan panel refreshes on the same tick so a step that resolves during a
     long stretch of tool calls shows up promptly rather than at the end.
     """
-    if state is None or not state.current_thread_id or not state.running_threads:
+    if state is None or not state.current_thread_id or not state.is_running:
         return state, gr.skip(), gr.skip()
     files_changed = refresh_thread_files(state, state.current_thread_id)
     return (
@@ -306,3 +329,50 @@ async def on_periodic_file_refresh(state: UIState):
         conversation_panel_update(state) if files_changed else gr.skip(),
         progress_update(state),
     )
+
+
+async def on_follow_run(state: UIState):
+    """Keep the conversation on screen in step with a run another page started.
+
+    That run writes into the state of the page that started it, which may be
+    gone (a reload, or a visit to /resources), and saves the conversation as it
+    goes. This reloads the saved copy whenever a newer one lands, and once more
+    when the run ends, for the final answer, its files and any plan review.
+    Chained after each handler that can put such a conversation on screen.
+    """
+    # Before anything else: when a generator ends without yielding, Gradio sends
+    # None to every output, which blanked the chat and the sidebar the handler
+    # this is chained after had just drawn.
+    yield gr.skip()
+    if state is None or not state.user_id or not state.current_thread_id:
+        return
+    thread_id = state.current_thread_id
+    run_state = ACTIVE_RUNS.get(thread_id)
+    if run_state is None or run_state is state:
+        return  # nothing running, or this page's own run, which streams to it directly
+    token = state.follower = object()
+    loaded = None
+    try:
+        while state.follower is token and state.current_thread_id == thread_id:
+            run_state = ACTIVE_RUNS.get(thread_id)
+            if run_state is state:
+                return
+            finished = run_state is None
+            revision = timeline_store.revision(thread_id)
+            if finished or revision != loaded:
+                payload = await load_timeline(state.user_id, thread_id)
+                approval = await read_pending_approval(thread_id) if finished else None
+                if state.current_thread_id != thread_id:
+                    return  # another conversation was opened while this loaded
+                timeline_store.apply_snapshot(state, payload, live=not finished)
+                state.processed_content_hashes = set()
+                refresh_thread_files(state, thread_id)
+                state.pending_approval = approval
+                loaded = revision
+                yield render(state)
+                if finished:
+                    return
+            await asyncio.sleep(FOLLOW_POLL_SECONDS)
+    finally:
+        if state.follower is token:
+            state.follower = None

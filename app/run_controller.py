@@ -4,7 +4,7 @@ import asyncio
 import contextvars
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Optional, Set, Tuple
 
 from app import timeline_store
 from app.app_config import AppRunConfig
@@ -16,7 +16,7 @@ from app.langgraph_runner import (
     read_pending_approval,
     stream_langgraph_events,
 )
-from app.state import UIState
+from app.state import ACTIVE_RUNS, UIState
 from backend.utils.output_paths import set_current_conversation_id, set_current_user_id
 from app.ui.approval import APPROVE_TEXT
 from app.ui.projection import render
@@ -236,9 +236,8 @@ async def _stream_run(prompt: str, state: UIState):
         return
 
     state.selected_thread_id = thread_id
-    state.running_threads.add(thread_id)
+    ACTIVE_RUNS[thread_id] = state
     state.stop_signals[thread_id] = False
-    yield render(state, clear_input=True)
 
     writer = timeline_store.DetachedTimelineWriter(state.user_id, thread_id)
     attached = True
@@ -265,6 +264,7 @@ async def _stream_run(prompt: str, state: UIState):
     )
 
     try:
+        yield render(state, clear_input=True)
         async for kind, item in _events_with_ticks(
             stream, FILE_LIST_REFRESH_INTERVAL_SECONDS, context=run_context
         ):
@@ -327,12 +327,17 @@ async def _stream_run(prompt: str, state: UIState):
     finally:
         with suppress(Exception):
             await stream.aclose()
-        state.running_threads.discard(thread_id)
         state.stop_signals.pop(thread_id, None)
-        await writer.maybe_flush(force=True)
+        try:
+            await writer.maybe_flush(force=True)
+            if stopped:
+                await _record_stop(state, thread_id, writer, attached=attached)
+        finally:
+            # Only after the last save: a page following this run from elsewhere
+            # takes the thread leaving the registry as its cue for a final reload.
+            ACTIVE_RUNS.pop(thread_id, None)
 
     if stopped:
-        await _record_stop(state, thread_id, writer, attached=attached)
         yield render(state)
         return
 
@@ -394,13 +399,54 @@ async def run_user_message(prompt: str, state: UIState):
             yield update
 
 
+# Runs being driven for a page; the event loop only keeps weak references to tasks.
+_page_runs: Set[asyncio.Task] = set()
+
+
+async def _outlive_page(updates: AsyncIterator[Tuple[Any, ...]]) -> AsyncIterator[Tuple[Any, ...]]:
+    """Drive ``updates`` from a task of its own and relay what it yields.
+
+    Gradio closes an event's generator once the page that started it goes away
+    (a reload, or following the Resources link), and a run driven by that
+    generator was aborted with it. Driven from a task, the run finishes and saves
+    the conversation as usual; only this relay ends with the page, and a page
+    opened later follows the run through `on_follow_run`.
+    """
+    relay: asyncio.Queue = asyncio.Queue()
+    listening = True
+
+    async def drive() -> None:
+        try:
+            async for update in updates:
+                if listening:
+                    relay.put_nowait(update)
+        except Exception as exc:  # noqa: BLE001 - re-raised on the page below
+            if listening:
+                relay.put_nowait(exc)
+            else:
+                logger.exception("Run failed after its page closed")
+        finally:
+            relay.put_nowait(None)
+
+    task = asyncio.get_running_loop().create_task(drive())
+    _page_runs.add(task)
+    task.add_done_callback(_page_runs.discard)
+    try:
+        while (update := await relay.get()) is not None:
+            if isinstance(update, Exception):
+                raise update
+            yield update
+    finally:
+        listening = False
+
+
 # Handlers
 
 
 async def on_send_message(prompt: str, state: UIState):
     if state is None:
         state = UIState()
-    async for update in run_user_message(prompt, state):
+    async for update in _outlive_page(run_user_message(prompt, state)):
         yield update
 
 
@@ -408,7 +454,7 @@ async def on_approve_plan(state: UIState):
     """Approve the paused plan without making the user phrase it."""
     if state is None:
         state = UIState()
-    async for update in run_user_message(APPROVE_TEXT, state):
+    async for update in _outlive_page(run_user_message(APPROVE_TEXT, state)):
         yield update
 
 
@@ -435,6 +481,9 @@ async def on_stop_run(state: UIState):
     if state is None:
         state = UIState()
     thread_id = state.current_thread_id
-    if thread_id and thread_id in state.running_threads:
-        state.stop_signals[thread_id] = True
+    # The flag goes on the state the run reads, which belongs to whichever page
+    # started it: possibly an earlier one, since closed.
+    run_state = ACTIVE_RUNS.get(thread_id) if thread_id else None
+    if run_state is not None and run_state.user_id == state.user_id:
+        run_state.stop_signals[thread_id] = True
     return render(state)

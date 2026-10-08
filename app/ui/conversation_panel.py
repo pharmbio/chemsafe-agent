@@ -12,7 +12,7 @@ from PIL import Image
 
 from app.config import logger
 from app.downloads import DOWNLOAD_ROUTE, build_download_payload, encode_download_token
-from app.state import UIState
+from app.state import ACTIVE_RUNS, UIState
 
 MAX_VISIBLE_FILES = 100
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -111,7 +111,7 @@ def _render_thread_files(state: UIState, thread_id: str) -> str:
 
 def _thread_badge(state: UIState, thread_id: str, *, is_active: bool) -> str:
     """Status dot for a thread the user is not currently looking at."""
-    if thread_id in state.running_threads:
+    if thread_id in ACTIVE_RUNS:
         return (
             "<span class='conversation-card__badge conversation-card__badge--running' "
             "title='Still running'>●</span>"

@@ -31,6 +31,8 @@ CONVERSATION_SCRIPT = """
             document.body.classList.add("light");
         }
         try {
+            // Gradio reads the parameter on load only; leave /resources clean.
+            if (currentView() === "resources") return;
             const url = new URL(window.location.href);
             if (url.searchParams.get("__theme") !== "light") {
                 url.searchParams.set("__theme", "light");
@@ -187,11 +189,71 @@ CONVERSATION_SCRIPT = """
         document.querySelectorAll("[data-partner-slider]").forEach((slider) => initPartnerSlider(slider));
     }
 
+    // Workspace and Resources switch in place. Loading the other page ended this
+    // page's Gradio session, and coming back meant a full reload.
+    let workspaceTitle = "";
+    let workspaceScrollY = 0;
+    let resourcesPrefetch = null;
+
+    function currentView() {
+        return (document.body && document.body.dataset.view) || "workspace";
+    }
+
+    function viewForLocation() {
+        return window.location.pathname.replace(/[/]+$/, "") === "/resources" ? "resources" : "workspace";
+    }
+
+    function loadResourcesFrame() {
+        const frame = document.getElementById("resources-frame");
+        if (frame && !frame.getAttribute("src")) frame.setAttribute("src", frame.dataset.src);
+    }
+
+    function showView(view) {
+        if (!document.body || view === currentView()) return;
+        if (view === "resources") {
+            // Read here, not at startup: Gradio sets the title after this script runs.
+            workspaceTitle = document.title;
+            workspaceScrollY = window.scrollY;
+            loadResourcesFrame();
+        }
+        document.body.dataset.view = view;
+        document.querySelectorAll("a.header-link[data-view]").forEach((link) => {
+            if (link.dataset.view === view) link.setAttribute("aria-current", "page");
+            else link.removeAttribute("aria-current");
+        });
+        document.title = view === "resources" ? `Resources | ${workspaceTitle}` : workspaceTitle;
+        window.scrollTo(0, view === "resources" ? 0 : workspaceScrollY);
+    }
+
+    document.addEventListener("click", (event) => {
+        const link = event.target.closest && event.target.closest("a.header-link[data-view]");
+        if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        if (link.dataset.view === currentView()) return;
+        window.history.pushState({ view: link.dataset.view }, "", link.getAttribute("href"));
+        showView(link.dataset.view);
+    });
+    window.addEventListener("popstate", () => showView(viewForLocation()));
+    window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (event.origin !== window.location.origin || !data || data.type !== "chemsafe:resources-height") return;
+        // Heights posted while hidden are for a zero-width frame.
+        const frame = document.getElementById("resources-frame");
+        if (frame && currentView() === "resources") frame.style.height = `${data.height}px`;
+    });
+
+    function prefetchResources() {
+        // Loaded ahead of the first switch, after the workspace has settled.
+        if (resourcesPrefetch || !document.getElementById("resources-frame")) return;
+        resourcesPrefetch = window.setTimeout(loadResourcesFrame, 2000);
+    }
+
     function ensureReady() {
         enforceLightTheme();
         observeThemeLock();
         bindHandlers();
         initPartnerSliders();
+        prefetchResources();
     }
 
     ensureReady();

@@ -15,13 +15,20 @@ from app.session import (
     on_clear_files,
     on_conversation_action,
     on_files_uploaded,
+    on_follow_run,
     on_login,
     on_logout,
     on_new_task,
     on_periodic_file_refresh,
     on_register,
 )
-from app.ui.assets import HEADER_LINKS_HTML, intro_markdown, logo_html, partner_logos_html
+from app.ui.assets import (
+    HEADER_LINKS_HTML,
+    RESOURCES_VIEW_HTML,
+    intro_markdown,
+    logo_html,
+    partner_logos_html,
+)
 
 from app.ui.scripts import CONVERSATION_SCRIPT
 from app.ui.theme import APP_CSS, CHEMSAFE_THEME
@@ -30,21 +37,36 @@ from app.ui.theme import APP_CSS, CHEMSAFE_THEME
 def build_demo() -> gr.Blocks:
     with gr.Blocks(
         title=APP_TITLE,
+        # Without it Gradio caps the app at a stepped max-width and centres it.
+        fill_width=True,
         theme=CHEMSAFE_THEME,
         css=APP_CSS,
         head=CONVERSATION_SCRIPT,
     ) as demo:
         state = gr.State()
+        # The sign-in token, kept in the browser so leaving the page (a reload, or
+        # the Resources link) does not sign the user out. Gradio hands this secret
+        # to the browser with the page, so it only obscures the stored value;
+        # fixing it keeps a sign-in across server restarts, where Gradio's default
+        # of a random key per process would not.
+        session_token = gr.BrowserState(
+            None, storage_key="chemsafe-session", secret="chemsafe-session"
+        )
 
         with gr.Row(elem_id="app-header"):
             logo_markup = logo_html()
             if logo_markup:
                 with gr.Column(scale=0, min_width=96):
-                    gr.HTML(logo_markup, elem_id="app-logo")
+                    gr.HTML(logo_markup, elem_id="app-logo", padding=False)
             with gr.Column(scale=1):
-                gr.HTML(f"<div class='app-title-text'>{APP_TITLE}</div>", elem_id="app-title")
-            with gr.Column(scale=0, min_width=260, elem_id="header-links-column"):
-                gr.HTML(HEADER_LINKS_HTML, elem_id="header-links")
+                gr.HTML(
+                    f"<div class='app-title-text'>{APP_TITLE}</div>", elem_id="app-title", padding=False
+                )
+            with gr.Column(scale=0, min_width=360, elem_id="header-links-column"):
+                gr.HTML(HEADER_LINKS_HTML, elem_id="header-links", padding=False)
+
+        # Hidden until the Resources link switches to it.
+        gr.HTML(RESOURCES_VIEW_HTML, elem_id="resources-view", padding=False)
 
         partner_panel = partner_logos_html()
         if partner_panel:
@@ -141,13 +163,28 @@ def build_demo() -> gr.Blocks:
         ]
         auth_outputs = workspace_outputs + [auth_status_md, logout_btn, login_btn, new_task_btn]
 
-        demo.load(on_app_load, inputs=None, outputs=auth_outputs + [conversation_action_bus])
+        # Run after anything that can put a conversation on screen: if another
+        # page's run is working on it (one since closed, or another tab), this
+        # keeps it current. Unlimited, as it lasts as long as that run does.
+        follow_run = dict(
+            fn=on_follow_run,
+            inputs=state,
+            outputs=workspace_outputs,
+            show_progress="hidden",
+            concurrency_limit=None,
+        )
+
+        demo.load(
+            on_app_load,
+            inputs=session_token,
+            outputs=auth_outputs + [conversation_action_bus, session_token],
+        ).then(**follow_run)
 
         conversation_action_bus.change(
             on_conversation_action,
             inputs=[conversation_action_bus, state],
             outputs=workspace_outputs + [conversation_action_bus],
-        )
+        ).then(**follow_run)
 
         file_refresh_timer.tick(
             on_periodic_file_refresh,
@@ -159,14 +196,14 @@ def build_demo() -> gr.Blocks:
         login_btn.click(
             on_login,
             inputs=[login_email, login_password, state],
-            outputs=auth_outputs,
-        )
+            outputs=auth_outputs + [session_token],
+        ).then(**follow_run)
         register_btn.click(
             on_register,
             inputs=[register_email, register_password, register_confirm, state],
             outputs=auth_outputs,
         )
-        logout_btn.click(on_logout, inputs=state, outputs=auth_outputs)
+        logout_btn.click(on_logout, inputs=state, outputs=auth_outputs + [session_token])
 
         new_task_btn.click(on_new_task, inputs=state, outputs=workspace_outputs)
 

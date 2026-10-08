@@ -90,7 +90,8 @@ APP_CSS = """
     }
     .gradio-container {
         max-width: none;
-        width: 100vw;
+        /* 100%, not 100vw: vw counts a visible scrollbar and pushes the right edge under it. */
+        width: 100%;
         margin: 0 auto !important;
         padding: 1.5rem 1.25rem 2rem;
     }
@@ -144,6 +145,8 @@ APP_CSS = """
         padding: 0 !important;
         display: flex;
         align-items: center;
+        /* The title's glyphs overrun its 0.95 line-height; Gradio would add a scrollbar. */
+        overflow: visible !important;
     }
     #app-title .app-title-text {
         font-family: var(--font-editorial);
@@ -164,6 +167,7 @@ APP_CSS = """
     }
     #header-links {
         display: flex;
+        justify-content: flex-end;
         gap: 0.75rem;
         align-items: center;
         font-weight: 600;
@@ -190,6 +194,29 @@ APP_CSS = """
     #header-links .header-link:focus {
         color: var(--header-link-hover-color);
         text-decoration: underline;
+    }
+    #header-links .header-link[aria-current="page"] {
+        color: var(--link-color);
+        font-weight: 600;
+        text-decoration: underline;
+        text-decoration-thickness: 2px;
+        text-underline-offset: 0.4em;
+    }
+    /* Workspace and Resources are two views of this page (app/ui/scripts.py). */
+    body:not([data-view="resources"]) #resources-view,
+    body[data-view="resources"] #partner-logos-panel,
+    body[data-view="resources"] #layout-row {
+        display: none !important;
+    }
+    /* Cancels the row gap, so the heading sits where the standalone page puts it. */
+    #resources-view {
+        margin-top: calc(-1 * var(--layout-gap, 16px));
+    }
+    #resources-frame {
+        display: block;
+        width: 100%;
+        height: 80vh;
+        border: 0;
     }
     #partner-logos-panel {
         width: 100%;
@@ -1104,7 +1131,6 @@ APP_CSS = """
     }
     @media (max-width: 900px) {
         .gradio-container {
-            width: 100vw;
             padding-top: 1rem;
             padding-left: 1rem;
             padding-right: 1rem;
@@ -1128,6 +1154,18 @@ APP_CSS = """
         #chatbot-panel {
             font-size: 1rem;
             line-height: 1.62;
+        }
+    }
+    @media (max-width: 640px) {
+        /* Three header links must fit a phone's width. */
+        #header-links {
+            justify-content: flex-start;
+        }
+        #header-links .header-links-content {
+            font-size: 0.75rem;
+        }
+        #header-links .header-link-divider {
+            padding: 0 0.6rem;
         }
     }
     """

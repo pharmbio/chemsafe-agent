@@ -165,8 +165,12 @@ def export_timeline_snapshot(state: UIState) -> Dict[str, Any]:
     }
 
 
-def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> bool:
-    """Rebuild the UI from a persisted snapshot of rendered timeline blocks."""
+def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any], *, live: bool = False) -> bool:
+    """Rebuild the UI from a persisted snapshot of rendered timeline blocks.
+
+    Unfinished blocks are shown as done, since a saved conversation's run is
+    normally over; ``live`` keeps them running, for a run still in flight.
+    """
     if not isinstance(snapshot, dict):
         return False
 
@@ -190,7 +194,7 @@ def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> 
 
         if kind == "assistant_plain":
             metadata = deepcopy(entry.get("metadata")) if isinstance(entry.get("metadata"), dict) else {}
-            if metadata.get("status") == "pending":
+            if not live and metadata.get("status") == "pending":
                 metadata["status"] = "done"
             block_id = metadata.get("id")
             state.messages.append(ChatMessage(role="assistant", content=str(entry.get("content", "")), metadata=metadata or None,))
@@ -207,7 +211,7 @@ def rebuild_from_timeline_snapshot(state: UIState, snapshot: Dict[str, Any]) -> 
         block_id = str(entry.get("block_id") or state.next_message_id(agent_name))
         metadata = deepcopy(entry.get("metadata")) if isinstance(entry.get("metadata"), dict) else {}
         metadata.setdefault("id", block_id)
-        if metadata.get("status") == "pending":
+        if not live and metadata.get("status") == "pending":
             metadata["status"] = "done"
 
         state.messages.append(ChatMessage(role="assistant", content="", metadata=metadata))
