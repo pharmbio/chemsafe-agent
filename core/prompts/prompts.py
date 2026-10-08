@@ -9,6 +9,7 @@ EXECUTE_SKILLS = [
     "woe_reasoning",
     "cheminformatics",
     "qsar_modelling",
+    "admet_prediction",
     "similarity_search",
     "qprf_generating",
 ]
