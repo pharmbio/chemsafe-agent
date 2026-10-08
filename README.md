@@ -56,7 +56,7 @@ cd chemsafe-agent
 
 # 2. Download the prebuilt persistence/ folder and place it under chemsafe-agent/
 #    Download persistence.zip (~6 GB, including guidelines vector store and pre-trained ML models) from Google Drive:
-#      https://drive.google.com/file/d/17ZUsk92FUA0MmHi6vjYInEvEnvCBNsUc/view?usp=sharing
+#      https://drive.google.com/file/d/1Z9l_eHd6tAPct4ZiLIgsIjcN9-ykmJP5/view?usp=sharing
 #    Then unzip it and put it under chemsafe-agent/, for example:
 unzip ~/Downloads/persistence.zip -d ./
 
@@ -65,7 +65,7 @@ unzip ~/Downloads/persistence.zip -d ./
 echo "OPENAI_API_KEY=your-openai-api-key-here" > .env
 
 ## Mandatory: Supabase PostgreSQL connection string
-echo "DATABASE_URL=postgresql://postgres:your-password@your-project.supabase.co:5432/postgres" >> .env
+echo "DATABASE_URL=postgresql://postgres:[your-password]@[your-project].supabase.co:5432/postgres" >> .env
 
 ## Optional: LangSmith tracing
 echo "LANGSMITH_TRACING=true" >> .env
