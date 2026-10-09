@@ -2,7 +2,7 @@
 
 ## Overview
 
-Chemical safety assessment requires reasoning over heterogeneous data — molecular structures, regulatory Standard Operating Procedures (SOPs), toxicological endpoints, and scientific literature — while keeping every safety-relevant decision traceable to an authoritative source. ChemSafeAgent is a **multi-agent system** that autonomously plans, executes, and summarizes chemical safety workflows under **human-in-the-loop supervision**. It combines a LangGraph orchestration graph, a restricted Python execution environment, retrieval-augmented access to professional SOPs, and a library of domain skills (cheminformatics, database traversal, weight-of-evidence reasoning) so that any chemical, threshold, or exposure decision is grounded in a verifiable source or explicitly flagged as unverified.
+Chemical safety assessment requires reasoning over heterogeneous data (molecular structures, regulatory Standard Operating Procedures (SOPs), toxicological endpoints, and scientific literature) while keeping every safety-relevant decision traceable to an authoritative source. ChemSafeAgent is a **multi-agent system** that autonomously plans, executes, and summarizes chemical safety workflows under **human-in-the-loop supervision**. It combines a LangGraph orchestration graph, a restricted Python execution environment, retrieval-augmented access to professional SOPs, and a library of domain skills (cheminformatics, database traversal, weight-of-evidence reasoning) so that any chemical, threshold, or exposure decision is grounded in a verifiable source or explicitly flagged as unverified.
 
 <div align="center">
   <img src="images/agent_illustration.png" width="700">
@@ -19,32 +19,26 @@ Chemical safety assessment requires reasoning over heterogeneous data — molecu
 
 ### Tool Surface & Skills
 
-- **`python_executor`**: The primary work engine. Code runs through a custom **restricted interpreter** (not raw `exec`), with only an allow-listed set of imports (RDKit, pandas, admet-ai, DeepChem, requests, and the repo's own modules). State persists across calls within a conversation.
+- **`python_executor`**: Code runs through a custom **restricted interpreter**, with only an allow-listed set of imports (RDKit, pandas, admet-ai, DeepChem, requests, and the repo's own modules).
 - **`read_files`**: Reads repo files, skill playbooks, and scoped artifacts, all behind a strict path sandbox.
 
-**Domain Skills** are markdown playbooks (plus optional helper scripts) the agent loads on demand. They draw on the following resources:
+**Domain Skills** are markdown playbooks (plus additional scripts/references) the agent loads on demand. They draw on the following resources:
 
 | Category | Resources |
 | --- | --- |
-| **Databases** | ECHA, PubChem, NIOSH |
-| **Guidelines** | ECHA, NIH |
-| **Predictive models** | 19 models from [MISTRA's tool box](https://pubs.acs.org/esthag/article/56/12/8363/489644/In-Silico-Identification-of-Potential-Thyroid) |
-| **Cheminformatics tools** | RDKit (flexible molecular calculation and modification) |
+| **Databases** | ECHA, PubChem, NIOSH, OPCW |
+| **Guidelines** | ECHA, NIH, UN,  |
+| **Predictive models** | [Models](https://github.com/pharmbio/ths-models/) from MISTRA's tool box and ADMET-AI |
+| **Cheminformatics tools** | RDKit |
 
-### Grounding & Memory Systems
-
-- **SOP RAG**: An ensemble retriever (BM25 sparse + Chroma dense, fused) over professional Standard Operating Procedures, so safety thresholds and requirements are cited from source documents.
-- **Persistent Conversations**: LangGraph state is checkpointed in PostgreSQL via an auto-reconnecting pool, making conversations resumable and human-approval interrupts durable.
-- **Context Compression**: A rolling summary plus structured memory (facts / outputs / decisions / open questions) bounds token growth over long sessions.
-- **Scoped Persistence & Auth**: Uploads, outputs, and state are scoped per `(user, conversation)`, with argon2-based authentication and registration-requires-approval.
 
 ## Quick Start
 
 ### Prerequisites
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - OpenAI API key from [platform.openai.com](https://platform.openai.com/)
-- A [Supabase](https://supabase.com/) project — used as the PostgreSQL backend for LangGraph checkpointing and user authentication (copy its connection string)
-- The prebuilt **memory folder** (SOP RAG indexes and agent memory), downloaded separately — see step 2 below
+- A [Supabase](https://supabase.com/) project: used as the PostgreSQL backend for LangGraph checkpointing and user authentication (copy its connection string). (Optional) We also have a [self-hosted template for Supabase](https://github.com/DinhLongHuynh/Supabase-template/) if you need one.
+- The prebuilt **persistence/ folder**: it will be downloaded separately (see step 2 below)
 - (Optional) LangSmith account for tracing from [smith.langchain.com](https://smith.langchain.com/)
 
 ### Initial Setup
