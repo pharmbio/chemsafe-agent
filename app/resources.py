@@ -92,7 +92,7 @@ ADMET_AI_COLLECTION: Dict[str, str] = {
     "url": "https://github.com/swansonk14/admet_ai",
     "model_url": "https://admet-ai.serve.scilifelab.se",
     "description": (
-        "Chemprop-RDKit graph neural networks trained on Therapeutics Data Commons datasets. "
+        "Graph neural networks trained on Therapeutics Data Commons datasets. "
         "All endpoints run as one web service on SciLifeLab Serve and are predicted in a single call."
     ),
 }

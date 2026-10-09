@@ -356,7 +356,7 @@ def _models_body() -> str:
     )
     return (
         _model_panel(MODEL_COLLECTION, ["Model name", "Endpoints", "Model URL"], safechem_rows)
-        + _model_panel(ADMET_AI_COLLECTION, ["Category", "Model name"], admet_rows)
+        + _model_panel(ADMET_AI_COLLECTION, ["Category", "Endpoints"], admet_rows)
     )
 
 
