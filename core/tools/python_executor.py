@@ -78,18 +78,20 @@ def _bound_output(result):
         f"{text[-tail:]}"
     )
 
+# Modules the model may import *inside* sandboxed code. This list deliberately
+# excludes the application's own packages (`app`, `backend`, `core`) and the
+# host-access modules (`os`, `sys`, `subprocess`, `dotenv`): sandboxed code has
+# no business importing those, and `app`/`backend`/`core` would expose the
+# interpreter internals and the OpenAI/DB credentials loaded in `app.config`.
+# Skill helpers that genuinely need them import them as ordinary modules (via
+# `from scripts.X import ...`), which runs through the real import system and is
+# unaffected by this gate.
 DEFAULT_AUTHORIZED_IMPORTS = [
-    'app',
-    'backend',
-    'core',
     'skills',
     'scripts',
     'json',
     'pathlib',
     'sqlalchemy',
-    'dotenv',
-    'os',
-    'sys',
     'pandas',
     'rdkit',
     'numpy',
@@ -109,9 +111,7 @@ DEFAULT_AUTHORIZED_IMPORTS = [
     'chembl_webresource_client',
     'admet_ai',
     'deepchem',
-    'core',
     'asyncio',
-    'subprocess',
     'textwrap',
     "similarity_search",
 ]
