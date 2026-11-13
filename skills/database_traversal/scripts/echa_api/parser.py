@@ -405,7 +405,7 @@ async def find_lead_dossiers(client: ECHAClient, substance_index: str) -> list[d
                 "role": role,
                 "status": status,
                 "date": d.get("lastUpdatedDate", ""),
-                "url": f"https://chem.echa.europa.eu/html-pages-prod/{asset_id}/index.html",
+                "url": f"https://chem.echa.europa.eu/html-pages/{asset_id}/index.html",
             })
 
         if lead_dossiers:

@@ -76,7 +76,7 @@ async def list_dossiers(substance_index, status="Active", max_results=10):
             "status": d.get("registrationStatus", status),
             "last_updated": d.get("lastUpdatedDate", ""),
             "registration_date": d.get("registrationDate", ""),
-            "dossier_url": f"https://chem.echa.europa.eu/html-pages-prod/{asset_id}/index.html",
+            "dossier_url": f"https://chem.echa.europa.eu/html-pages/{asset_id}/index.html",
         })
 
     total_available = len(dossiers)

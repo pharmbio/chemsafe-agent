@@ -95,13 +95,14 @@ class ECHAClient:
         finally:
             await resp.aclose()
 
-    # Rendered dossier pages
+    # Rendered dossier pages. ECHA serves these from /html-pages/ (the dossier
+    # viewer's azureStoragePath); /html-pages-prod/ now only returns the SPA shell.
     async def get_dossier_index(self, asset_id):
-        return await self.get_html(f"/html-pages-prod/{asset_id}/index.html")
+        return await self.get_html(f"/html-pages/{asset_id}/index.html")
 
     async def get_document_html(self, asset_id, doc_id):
         return await self.get_html(
-            f"/html-pages-prod/{asset_id}/documents/{doc_id}.html"
+            f"/html-pages/{asset_id}/documents/{doc_id}.html"
         )
 
     # Substance, substance search, and dossier listing
