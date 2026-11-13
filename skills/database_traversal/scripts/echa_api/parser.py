@@ -641,45 +641,9 @@ async def parse_dossier_sections(
 
 
 # Section 7 (toxicology)
-# Endpoint description text -> Section 7 subsection.
-ENDPOINT_TO_SECTION = {
-    "basic toxicokinetics": "7.1",
-    "dermal absorption": "7.1",
-    "acute toxicity: oral": "7.2",
-    "acute toxicity: inhalation": "7.2",
-    "acute toxicity: dermal": "7.2",
-    "acute toxicity: other routes": "7.2",
-    "skin irritation": "7.3",
-    "eye irritation": "7.3",
-    "skin sensitisation": "7.4",
-    "respiratory sensitisation": "7.4",
-    "repeated dose toxicity: oral": "7.5",
-    "repeated dose toxicity: inhalation": "7.5",
-    "repeated dose toxicity: dermal": "7.5",
-    "repeated dose toxicity: other": "7.5",
-    "genetic toxicity in vitro": "7.6",
-    "genetic toxicity in vivo": "7.6",
-    "carcinogenicity": "7.7",
-    "toxicity to reproduction": "7.8",
-    "developmental toxicity / teratogenicity": "7.8",
-    "toxicity to reproduction: other studies": "7.8",
-    "neurotoxicity": "7.9",
-    "immunotoxicity": "7.9",
-    "specific investigations: other studies": "7.9",
-    "health surveillance data": "7.10",
-    "epidemiological data": "7.10",
-    "direct observations: clinical cases": "7.10",
-    "exposure related observations in humans": "7.10",
-}
-
-
-def identify_section(endpoint_text: str) -> str:
-    """Map an endpoint description to its Section 7 subsection ('7.0' if unknown)."""
-    text_lower = endpoint_text.strip().lower()
-    for pattern, section in ENDPOINT_TO_SECTION.items():
-        if pattern in text_lower:
-            return section
-    return "7.0"
+# Section 7 lives behind this collapse container in the dossier index, the
+# same way Sections 5/6 do (see _COLLAPSE_IDS).
+_SECTION7_COLLAPSE_ID = "id_7_Toxicologicalinformation"
 
 
 async def parse_section_7(
@@ -831,57 +795,18 @@ def _extract_dnmels(soup: BeautifulSoup) -> list[dict]:
 
 
 def _scan_section7_docs(index_html: str) -> dict[str, list[dict]]:
-    """Group Section 7 document links by subsection, inferring the subsection
-    from endpoint keywords in the link text or the surrounding markup."""
-    soup = BeautifulSoup(index_html, "html.parser")
+    """Group Section 7 document links by subsection, read from the dossier's
+    Section 7 container. Deeper headings (e.g. 7.2.1, 7.9.3.2) roll up into
+    their two-level parent (7.2, 7.9) so callers can keep filtering by '7.2';
+    documents filed directly under Section 7 land in '7.0'."""
+    grouped = _parse_collapsed_section_index(index_html, "7", _SECTION7_COLLAPSE_ID)
     sections: dict[str, list[dict]] = {}
-
-    for link in soup.find_all("a", href=True):
-        href = str(link["href"])
-        numeric = re.search(r"documents/(\d+)\.html", href)
-        if numeric:
-            doc_id = numeric.group(1)
-        else:
-            uuid_pair = _UUID_PAIR_RE.match(href)
-            if not uuid_pair:
-                continue
-            doc_id = uuid_pair.group(1)
-
-        name = link.get_text(strip=True)
-        section_num = _infer_section_from_context(link, name)
-        if not section_num or not section_num.startswith("7"):
-            continue
-
-        sections.setdefault(section_num, []).append(
-            {"doc_id": doc_id, "name": name, "type": _doc_type(name)}
-        )
-
+    for sec_num, docs in grouped.items():
+        key = ".".join(sec_num.split(".")[:2])
+        bucket = sections.setdefault(key, [])
+        bucket.extend(docs["summaries"])
+        bucket.extend(docs["studies"])
     return sections
-
-
-def _infer_section_from_context(link_el, name: str) -> str | None:
-    section = identify_section(name)
-    if section != "7.0":
-        return section
-
-    current = link_el.parent
-    for _ in range(15):
-        if current is None:
-            break
-
-        text = current.get_text(strip=True)[:300] if hasattr(current, "get_text") else ""
-        match = re.search(r"(7\.\d+)", text)
-        if match:
-            return match.group(1)
-
-        el_id = current.get("id", "") if hasattr(current, "get") else ""
-        id_match = re.search(r"7[_.-](\d+)", el_id)
-        if id_match:
-            return f"7.{id_match.group(1)}"
-
-        current = current.parent
-
-    return None
 
 
 # Identifier picking
