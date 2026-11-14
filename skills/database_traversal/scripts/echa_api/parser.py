@@ -8,10 +8,6 @@ logger = logging.getLogger(__name__)
 # A dossier document id is either the legacy numeric form (documents/123.html)
 # or the newer "{uuid}_{uuid}" leaf id.
 DOC_ID_RE = re.compile(r"((?:IUC5-)?[A-Za-z0-9-]+_[A-Za-z0-9-]+)")
-_UUID_PAIR_RE = re.compile(
-    r"^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
-)
 
 # Placeholder strings ECHA renders when a field carries no real value.
 _EMPTY = frozenset(
@@ -43,7 +39,7 @@ def extract_field_value(container: Tag, label_text: str) -> str:
         if needle in label_el.get_text(strip=True).lower():
             value_el = label_el.find_next_sibling(class_="das-field_value")
             if value_el:
-                return clean_value(value_el.get_text(strip=True))
+                return _extract_value(value_el)
     return ""
 
 
@@ -341,53 +337,19 @@ def _section_sort_key(section: str) -> tuple[int, ...]:
     return tuple(int(part) for part in section.split(".") if part.isdigit())
 
 
-def _scan_section_docs(index_html: str, section: str) -> list[dict]:
-    """Find document links under a numbered section such as '2.1' or '2.3'.
+# Section 2 (2.1 GHS, 2.3 PBT) lives behind this collapse container.
+_SECTION2_COLLAPSE_ID = "id_2_ClassificationLabellingandPBTassessment"
 
-    Section membership is inferred by walking up the DOM from each link and
-    matching the section number in nearby text or on element id/class.
-    """
-    soup = BeautifulSoup(index_html, "html.parser")
+
+def _scan_section2_docs(index_html: str, section: str) -> list[dict]:
+    """Document links (summaries first) filed under '2.1' or '2.3', read from
+    the dossier's Section 2 container."""
+    grouped = _parse_collapsed_section_index(index_html, "2", _SECTION2_COLLAPSE_ID)
     docs = []
-
-    for link in soup.find_all("a", href=True):
-        href = str(link["href"])
-        numeric = re.search(r"documents/(\d+)\.html", href)
-        if numeric:
-            doc_id = numeric.group(1)
-        else:
-            uuid_pair = _UUID_PAIR_RE.match(href)
-            if not uuid_pair:
-                continue
-            doc_id = uuid_pair.group(1)
-
-        name = link.get_text(strip=True)
-        section_normalized = section.replace(".", "_")
-
-        # Walk up to 10 ancestors looking for the section number in nearby
-        # text or on an element's id/class before accepting the link.
-        current = link.parent
-        matched = False
-        for _ in range(10):
-            if current is None:
-                break
-            if hasattr(current, "get_text"):
-                parent_text = current.get_text(strip=True)[:200]
-                if re.search(rf"(?:^|\s|\|){re.escape(section)}(?:\s|\||$)", parent_text):
-                    matched = True
-                    break
-                el_id = current.get("id", "")
-                el_class = " ".join(current.get("class", []))
-                if section_normalized in el_id or section_normalized in el_class:
-                    matched = True
-                    break
-            current = current.parent
-
-        if not matched:
-            continue
-
-        docs.append({"doc_id": doc_id, "name": name, "type": _doc_type(name)})
-
+    for sec_num in sorted(grouped, key=_section_sort_key):
+        if sec_num == section or sec_num.startswith(f"{section}."):
+            docs.extend(grouped[sec_num]["summaries"])
+            docs.extend(grouped[sec_num]["studies"])
     return docs
 
 
@@ -504,7 +466,7 @@ async def parse_section_2_1_ghs(client: ECHAClient, asset_id: str) -> list[dict]
     if not index_html:
         return []
 
-    doc_links = _scan_section_docs(index_html, section="2.1")
+    doc_links = _scan_section2_docs(index_html, "2.1")
     if not doc_links:
         logger.info("No Section 2.1 documents found for asset %s", asset_id)
         return []
@@ -567,7 +529,7 @@ async def parse_section_2_3_pbt(client: ECHAClient, asset_id: str) -> dict:
     if not index_html:
         return {"summaries": [], "studies": []}
 
-    doc_links = _scan_section_docs(index_html, section="2.3")
+    doc_links = _scan_section2_docs(index_html, "2.3")
     if not doc_links:
         return {"summaries": [], "studies": []}
 
@@ -703,7 +665,7 @@ async def parse_section_7(
                 section_data["summaries"].append(
                     _parse_toxicology_document(soup, doc["name"], "Summary", section_num)
                 )
-                result["dnmels"].extend(_extract_dnmels(soup))
+                _merge_dnmels(result["dnmels"], _extract_dnmels(soup), doc["name"].split(" |")[0])
             except Exception as exc:
                 logger.warning("Failed to parse summary %s: %s", doc["doc_id"], exc)
 
@@ -798,6 +760,25 @@ def _extract_dnmels(soup: BeautifulSoup) -> list[dict]:
             context = {"population": match.group(1), "route": match.group(2) or match.group(3)}
             _collect_dnmels(block, context, dnmels)
     return dnmels
+
+
+_DNEL_CONTEXT = ("population", "route", "effects", "exposure")
+
+
+def _merge_dnmels(rows: list[dict], new_rows: list[dict], source: str) -> None:
+    """Add one DN(M)EL summary's rows. A dossier can hold several such
+    summaries (S-01, S-02, ...): a row they share is listed once, and each row's
+    ``source`` names the summaries that report it. A differing row is placed
+    next to the other rows for the same population / route / effects / exposure."""
+    for row in new_rows:
+        for existing in rows:
+            if {k: v for k, v in existing.items() if k != "source"} == row:
+                existing["source"].append(source)
+                break
+        else:
+            context = tuple(row.get(k) for k in _DNEL_CONTEXT)
+            same = [i for i, r in enumerate(rows) if tuple(r.get(k) for k in _DNEL_CONTEXT) == context]
+            rows.insert(same[-1] + 1 if same else len(rows), {**row, "source": [source]})
 
 
 def _collect_dnmels(block: object, context: dict, rows: list[dict]) -> None:

@@ -14,6 +14,25 @@ def _dossier_info(dossier, *, include_type_role=True):
     return info
 
 
+# Summary free text ("Additional information" above all) can run past 100 KB
+# per field. The summary tool is the quick overview, so it cuts each text value.
+_SUMMARY_TEXT_LIMIT = 2000
+
+
+def _cap_text(obj, limit=_SUMMARY_TEXT_LIMIT):
+    """Cut every string longer than ``limit``, saying how much was cut."""
+    if isinstance(obj, dict):
+        return {k: _cap_text(v, limit) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_cap_text(v, limit) for v in obj]
+    if isinstance(obj, str) and len(obj) > limit:
+        return (
+            f"{obj[:limit]} … [text cut: first {limit:,} of {len(obj):,} characters "
+            "shown; tool_get_toxicology_full returns the complete text]"
+        )
+    return obj
+
+
 async def _resolve_dossier(substance_index):
     """Return (dossier, None) or (None, error_json) for the best dossier."""
     dossier = await select_best_dossier(get_client(), substance_index)
@@ -30,7 +49,8 @@ async def get_toxicology_summary(substance_index):
     """Get Section 7 summaries and DN(M)EL values only (fast path).
 
     Skips individual study records, returning just the per-subsection summary
-    documents plus any derived no/minimal-effect levels. Returns a JSON string.
+    documents plus any derived no/minimal-effect levels. Text values longer
+    than 2,000 characters are cut, with a note. Returns a JSON string.
     """
     dossier, error = await _resolve_dossier(substance_index)
     if error:
@@ -48,8 +68,8 @@ async def get_toxicology_summary(substance_index):
         {
             "substance_index": substance_index,
             "dossier_info": _dossier_info(dossier),
-            "dnmels": data.get("dnmels", []),
-            "sections": summary_sections,
+            "dnmels": _cap_text(data.get("dnmels", [])),
+            "sections": _cap_text(summary_sections),
         },
         ensure_ascii=False,
         indent=2,

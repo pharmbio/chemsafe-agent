@@ -141,7 +141,8 @@ async def tool_get_toxicology_summary(substance_index: str) -> str:
 
     Returns ONLY summary documents and DNEL/DMEL values. This is much
     faster than the full query. Use this for a quick overview of
-    toxicological endpoints.
+    toxicological endpoints. Text longer than 2,000 characters is cut, with
+    a note saying so; tool_get_toxicology_full returns the complete text.
 
     Sections: 7.1-7.10 (toxicokinetics, acute tox, irritation,
     sensitisation, repeated dose, genotox, carcinogenicity,
