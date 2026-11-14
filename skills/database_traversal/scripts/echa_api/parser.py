@@ -69,9 +69,23 @@ def _extract_value(value_div) -> str:
 
     html_value = value_div.find("div", class_="das-field_value_html")
     if html_value:
-        return clean_value(html_value.get_text(" ", strip=True))
+        return _html_text(html_value)
 
     return clean_value(value_div.get_text(" ", strip=True))
+
+
+_BLOCK_TAGS = ("p", "div", "br", "li", "ul", "ol", "table", "tr", "td", "th",
+               "h1", "h2", "h3", "h4", "h5", "h6")
+
+
+def _html_text(el) -> str:
+    """Free text as a browser shows it. ECHA's rich text splits words across
+    inline spans ("B" + "isphenol"), so inline pieces are joined directly and
+    only block elements are separated by whitespace."""
+    for tag in el.find_all(_BLOCK_TAGS):
+        tag.insert_before(" ")
+        tag.insert_after(" ")
+    return clean_value(el.get_text())
 
 
 def _extract_quantity_range(range_el) -> str:
@@ -111,16 +125,20 @@ def parse_document(html: str, name: str, doc_type: str, section: str) -> dict:
     """Parse one ECHA HTML document into nested label/value blocks."""
     soup = BeautifulSoup(html, "html.parser")
     h4 = soup.find("h4")
-    result = {
+    return {
         "name": name or (h4.get_text(" ", strip=True) if h4 else ""),
         "type": doc_type,
         "section": section,
-        "fields": {},
+        "fields": _article_blocks(soup),
     }
 
+
+def _article_blocks(soup: BeautifulSoup) -> dict:
+    """The document's top-level das-blocks as {heading: nested label/value data}."""
+    fields = {}
     article = soup.find("article")
     if not article:
-        return result
+        return fields
 
     for block in article.find_all("section", class_=re.compile(r"das-block"), recursive=False):
         h3 = block.find("h3")
@@ -129,9 +147,9 @@ def parse_document(html: str, name: str, doc_type: str, section: str) -> dict:
         block_name = clean_value(h3.get_text(" ", strip=True))
         block_value = _extract_block(block)
         if block_name and block_value:
-            _add_key(result["fields"], block_name, block_value)
+            _add_key(fields, block_name, block_value)
 
-    return result
+    return fields
 
 
 def _extract_block(block) -> object:
@@ -159,7 +177,7 @@ def _extract_block(block) -> object:
 
     html_value = block.find("div", class_="das-field_value_html")
     if html_value:
-        return clean_value(html_value.get_text(" ", strip=True))
+        return _html_text(html_value)
     value = block.find("div", class_="das-field_value")
     return _extract_value(value) if value else ""
 
@@ -710,14 +728,13 @@ async def parse_section_7(
 
 
 def _parse_toxicology_document(soup: BeautifulSoup, name: str, doc_type: str, section: str) -> dict:
-    fields = {
-        "endpoint": extract_field_value(soup, "Endpoint"),
-        "type_of_information": extract_field_value(soup, "Type of information"),
-        "adequacy": extract_field_value(soup, "Adequacy of study"),
-        "reliability": extract_field_value(soup, "Reliability"),
-    }
-
     if doc_type == "Study":
+        fields = {
+            "endpoint": extract_field_value(soup, "Endpoint"),
+            "type_of_information": extract_field_value(soup, "Type of information"),
+            "adequacy": extract_field_value(soup, "Adequacy of study"),
+            "reliability": extract_field_value(soup, "Reliability"),
+        }
         fields["guideline"] = extract_field_value(soup, "Guideline")
         fields["qualifier"] = extract_field_value(soup, "Qualifier")
         fields["glp"] = extract_field_value(soup, "GLP compliance")
@@ -744,54 +761,71 @@ def _parse_toxicology_document(soup: BeautifulSoup, name: str, doc_type: str, se
         elif section == "7.4":  # sensitisation
             fields["test_system"] = extract_field_value(soup, "Test system")
     else:
-        fields["key_value_for_csr"] = extract_field_value(soup, "Key value for chemical safety assessment")
-        fields["discussion"] = extract_field_value(soup, "Discussion")
-        fields["long_description"] = extract_field_value(soup, "Description of key information")
-        fields["additional_information"] = extract_field_value(soup, "Additional information")
+        # Summaries are laid out as named blocks; the per-route key values
+        # (endpoint conclusion, dose descriptor, effect level) sit inside
+        # "Key value for assessment".
+        blocks = _article_blocks(soup)
+        fields = {
+            "key_value_for_csr": blocks.get("Key value for assessment", ""),
+            "long_description": blocks.get("Description of key information", ""),
+            "classification_justification": _blocks_with_prefix(blocks, "Justification for classification"),
+            "additional_information": _blocks_with_prefix(blocks, "Additional information"),
+        }
 
     return {"name": name, "type": doc_type, "section": section, "fields": fields}
 
 
-# DN(M)EL fields that ECHA exposes as flat label/value pairs.
-_DNEL_LABELS = tuple(
-    f"DNEL ({population}, {duration}, {kind}, {route})"
-    for population in ("Workers", "General population")
-    for duration in ("acute", "chronic")
-    for kind in ("systemic", "local")
-    for route in ("inhalation", "dermal", "oral")
-)
+def _blocks_with_prefix(blocks: dict, prefix: str) -> object:
+    """One block's value, or {heading: value} when several headings share the
+    prefix (e.g. "Additional information - workers" / "- General Population")."""
+    found = {k: v for k, v in blocks.items() if k.startswith(prefix)}
+    if len(found) == 1:
+        return next(iter(found.values()))
+    return found or ""
+
+
+# The DN(M)EL summary has one block per population and route, e.g.
+# "Workers - Hazard via inhalation route" or "General Population - Hazard for the eyes".
+_DNEL_BLOCK_RE = re.compile(r"^(Workers|General Population) - Hazard (?:via (.+?) route|for the (.+))$")
 
 
 def _extract_dnmels(soup: BeautifulSoup) -> list[dict]:
-    """Pull DN(M)EL values out of a summary, from both tables and flat fields."""
+    """One row per assessed population / route / effect / exposure duration."""
     dnmels = []
-
-    for table in soup.find_all("table"):
-        headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
-
-        if not any("dnel" in h or "dmel" in h or "most sensitive" in h for h in headers):
-            prev = table.find_previous()
-            prev_text = prev.get_text(strip=True).lower() if prev else ""
-            if not any(k in prev_text for k in ("dnel", "dmel", "derived")):
-                continue
-
-        for tr in table.find_all("tr")[1:]:
-            cells = tr.find_all("td")
-            if len(cells) < 2:
-                continue
-            row = {
-                (headers[i] if i < len(headers) else f"col_{i}"): clean_value(cell.get_text(strip=True))
-                for i, cell in enumerate(cells)
-            }
-            if any(row.values()):
-                dnmels.append(row)
-
-    for label in _DNEL_LABELS:
-        value = extract_field_value(soup, label)
-        if value:
-            dnmels.append({"type": label, "value": value})
-
+    for heading, block in _article_blocks(soup).items():
+        match = _DNEL_BLOCK_RE.match(heading)
+        if match:
+            context = {"population": match.group(1), "route": match.group(2) or match.group(3)}
+            _collect_dnmels(block, context, dnmels)
     return dnmels
+
+
+def _collect_dnmels(block: object, context: dict, rows: list[dict]) -> None:
+    """Descend through "Systemic/Local effects" and "Long term/Acute exposure"
+    sub-blocks down to each "Hazard assessment conclusion"."""
+    if isinstance(block, list):
+        for item in block:
+            _collect_dnmels(item, context, rows)
+        return
+    if not isinstance(block, dict):
+        return
+
+    if "Hazard assessment conclusion" in block:
+        row = {**context, "conclusion": block["Hazard assessment conclusion"]}
+        for label, key in (
+            ("Value", "value"),
+            ("Most sensitive endpoint", "most_sensitive_endpoint"),
+            ("Route of original study", "route_of_original_study"),
+            ("DNEL related information", "derivation"),
+        ):
+            if label in block:
+                row[key] = block[label]
+        rows.append(row)
+        return
+
+    for label, sub in block.items():
+        key = "effects" if label.endswith("effects") else "exposure"
+        _collect_dnmels(sub, {**context, key: label}, rows)
 
 
 def _scan_section7_docs(index_html: str) -> dict[str, list[dict]]:
